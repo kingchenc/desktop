@@ -83,3 +83,16 @@
     padding-bottom: var(--spacing-half);
   }
 }
+
+#update-progress-banner {
+  .update-progress-text {
+    margin: 0 var(--spacing-half);
+    white-space: nowrap;
+  }
+
+  .update-progress-bar {
+    flex: 1;
+    min-width: 80px;
+    height: 8px;
+  }
+}
