@@ -3,7 +3,7 @@ const lastSuccessfulCheckKey = 'last-successful-update-check'
 import { Emitter, Disposable } from 'event-kit'
 
 import {
-  checkForUpdates,
+  checkForCustomUpdates,
   isRunningUnderARM64Translation,
   onAutoUpdaterCheckingForUpdate,
   onAutoUpdaterError,
@@ -197,7 +197,7 @@ class UpdateStore {
    *                       effectively disable the staggered releases system and
    *                       attempt to retrieve the latest available deployment.
    */
-  public async checkForUpdates(inBackground: boolean, skipGuidCheck: boolean) {
+  public async checkForUpdates(inBackground: boolean, _skipGuidCheck: boolean) {
     // An update has been downloaded and the app is waiting to be restarted.
     // Checking for updates again may result in the running app being nuked
     // when it finds a subsequent update on Windows, or the "Quit and Update"
@@ -208,19 +208,12 @@ class UpdateStore {
       return
     }
 
-    const updatesUrl = await this.getUpdatesUrl(skipGuidCheck)
-
-    if (updatesUrl === null) {
-      return
-    }
-
     this.userInitiatedUpdate = !inBackground
 
-    const error = await checkForUpdates(updatesUrl)
-
-    if (error !== undefined) {
-      this.emitError(error)
-    }
+    // Route all update checks through the fork's custom updater. It emits the
+    // auto-updater-* events this store already listens to, plus download
+    // progress for the update banner.
+    checkForCustomUpdates()
   }
 
   private async getUpdatesUrl(skipGuidCheck: boolean) {

@@ -145,6 +145,16 @@ export interface ILocalRepositoryState {
    * The number of uncommitted changes currently in the repository.
    */
   readonly changedFilesCount: number
+  /**
+   * Total added lines across the working directory (tracked changes vs HEAD),
+   * or `undefined` if not yet computed.
+   */
+  readonly linesAdded?: number
+  /**
+   * Total deleted lines across the working directory (tracked changes vs HEAD),
+   * or `undefined` if not yet computed.
+   */
+  readonly linesDeleted?: number
 }
 
 /**
