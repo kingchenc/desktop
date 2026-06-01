@@ -72,6 +72,7 @@ describe('IPC channel contract', () => {
     'custom-update-available',
     'custom-update-progress',
     'custom-update-ready',
+    'check-for-custom-updates',
   ] as const
 
   const expectedResponseChannels = [
