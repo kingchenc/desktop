@@ -74,6 +74,10 @@ import {
 } from './filter-changes-logic'
 import { ChangesListFilterOptions } from './changes-list-filter-options'
 import { HookProgress } from '../../lib/git'
+import {
+  getWorkingDirectoryLineChanges,
+  ILineChanges,
+} from '../../lib/git/diff'
 import { formatNumber } from '../../lib/format-number'
 
 export interface IChangesListItem extends IFilterListItem {
@@ -255,6 +259,8 @@ interface IFilterChangesListState {
   readonly selectedItems: ReadonlyArray<IChangesListItem>
   readonly focusedRow: string | null
   readonly groups: ReadonlyArray<IFilterListGroup<IChangesListItem>>
+  /** Per-file added/deleted line counts, keyed by file path */
+  readonly lineChanges: ReadonlyMap<string, ILineChanges>
 }
 
 function getSelectedItemsFromProps(
@@ -302,6 +308,7 @@ export class FilterChangesList extends React.Component<
   IFilterChangesListState
 > {
   private filterTextBox: TextBox | undefined = undefined
+  private lineChangesRequestId = 0
   private headerRef = createObservableRef<HTMLDivElement>()
   private filterOptionsButtonRef: HTMLButtonElement | null = null
   private includeAllCheckBoxRef = React.createRef<Checkbox>()
@@ -367,7 +374,38 @@ export class FilterChangesList extends React.Component<
       selectedItems: getSelectedItemsFromProps(props),
       focusedRow: null,
       groups,
+      lineChanges: new Map<string, ILineChanges>(),
     }
+  }
+
+  public componentDidMount() {
+    this.refreshLineChanges()
+  }
+
+  public componentDidUpdate(prevProps: IFilterChangesListProps) {
+    if (
+      prevProps.workingDirectory !== this.props.workingDirectory ||
+      prevProps.repository.id !== this.props.repository.id
+    ) {
+      this.refreshLineChanges()
+    }
+  }
+
+  /**
+   * Fetch per-file line counts for the current working directory. A request id
+   * guards against out-of-order async results overwriting newer state.
+   */
+  private refreshLineChanges() {
+    const requestId = ++this.lineChangesRequestId
+    const repository = this.props.repository
+
+    getWorkingDirectoryLineChanges(repository)
+      .then(lineChanges => {
+        if (requestId === this.lineChangesRequestId) {
+          this.setState({ lineChanges })
+        }
+      })
+      .catch(() => {})
   }
 
   public componentWillReceiveProps(nextProps: IFilterChangesListProps) {
@@ -470,6 +508,8 @@ export class FilterChangesList extends React.Component<
         checkboxTooltip={checkboxTooltip}
         focused={this.state.focusedRow === changeListItem.id}
         matches={matches}
+        linesAdded={this.state.lineChanges.get(file.path)?.added}
+        linesDeleted={this.state.lineChanges.get(file.path)?.deleted}
       />
     )
   }
@@ -1271,6 +1311,38 @@ export class FilterChangesList extends React.Component<
           className="changes-list-check-all"
           label={checkAllLabel}
         />
+        {this.renderTotalLineChanges()}
+      </div>
+    )
+  }
+
+  /** Render the summed added/deleted line counts across all changed files. */
+  private renderTotalLineChanges() {
+    let added = 0
+    let deleted = 0
+    let known = false
+
+    for (const file of this.props.workingDirectory.files) {
+      const lineChanges = this.state.lineChanges.get(file.path)
+
+      if (lineChanges !== undefined) {
+        added += lineChanges.added
+        deleted += lineChanges.deleted
+        known = true
+      }
+    }
+
+    if (!known) {
+      return null
+    }
+
+    return (
+      <div
+        className="changes-list-total-line-changes"
+        title="Total added and removed lines across all changed files"
+      >
+        <span className="added">+{added}</span>
+        <span className="deleted">-{deleted}</span>
       </div>
     )
   }
