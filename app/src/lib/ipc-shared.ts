@@ -87,6 +87,9 @@ export type RequestChannels = {
   'show-installing-update': () => void
   'install-windows-cli': () => void
   'uninstall-windows-cli': () => void
+  'custom-update-available': (version: string) => void
+  'custom-update-progress': (progress: number) => void
+  'custom-update-ready': () => void
 }
 
 /**
