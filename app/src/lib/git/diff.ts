@@ -23,7 +23,7 @@ import {
 
 import { DiffParser } from '../diff-parser'
 import { getOldPathOrDefault } from '../get-old-path'
-import { readFile, writeFile, unlink } from 'fs/promises'
+import { readFile, writeFile, unlink, stat } from 'fs/promises'
 import { getTempFilePath } from '../file-system'
 import { forceUnwrap } from '../fatal-error'
 import { git } from './core'
@@ -940,7 +940,8 @@ export interface ILineChanges {
  * because they are not part of `git diff HEAD`.
  */
 export async function getWorkingDirectoryLineChanges(
-  repository: Repository
+  repository: Repository,
+  includeUntracked: boolean = true
 ): Promise<Map<string, ILineChanges>> {
   const result = new Map<string, ILineChanges>()
 
@@ -978,6 +979,49 @@ export async function getWorkingDirectoryLineChanges(
 
     if (path !== '') {
       result.set(path, { added, deleted })
+    }
+  }
+
+  if (!includeUntracked) {
+    return result
+  }
+
+  // `git diff HEAD` does not include untracked files, so count their added
+  // lines (the whole file) separately. Ignored files are excluded via
+  // --exclude-standard, so this is normally just a handful of new files.
+  const untracked = await git(
+    ['ls-files', '--others', '--exclude-standard', '-z'],
+    repository.path,
+    'getWorkingDirectoryUntrackedFiles'
+  )
+
+  for (const relativePath of untracked.stdout.split('\0')) {
+    if (relativePath === '' || result.has(relativePath)) {
+      continue
+    }
+
+    try {
+      const fullPath = Path.join(repository.path, relativePath)
+      const info = await stat(fullPath)
+
+      // Skip directories and very large files to avoid reading huge artifacts.
+      if (!info.isFile() || info.size > 5 * 1024 * 1024) {
+        continue
+      }
+
+      const content = await readFile(fullPath, 'utf8')
+      let added = 0
+
+      if (content.length > 0) {
+        added = content.split('\n').length
+        if (content.endsWith('\n')) {
+          added -= 1
+        }
+      }
+
+      result.set(relativePath, { added, deleted: 0 })
+    } catch {
+      // Unreadable file (race, permissions, etc.) - just skip it.
     }
   }
 
