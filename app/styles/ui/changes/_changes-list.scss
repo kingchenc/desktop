@@ -330,39 +330,41 @@
     flex-shrink: 0;
   }
 
-  // Per-file added/deleted line counts shown in each changed-file row.
-  .file .file-line-changes {
-    display: flex;
-    flex-shrink: 0;
-    margin-left: auto;
-    padding-left: var(--spacing-half);
-    font-variant-numeric: tabular-nums;
+}
 
-    .added {
-      color: var(--color-new);
-    }
+// Per-file added/deleted line counts shown in each changed-file row.
+.file-line-changes {
+  display: flex;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: var(--spacing-half);
+  padding-left: var(--spacing-half);
+  font-variant-numeric: tabular-nums;
 
-    .deleted {
-      color: var(--color-deleted);
-      margin-left: var(--spacing-half);
-    }
+  .added {
+    color: var(--color-new);
   }
 
-  // Summed added/deleted line counts across all changed files (list header).
-  .changes-list-total-line-changes {
-    display: flex;
-    flex-shrink: 0;
-    margin-left: auto;
-    padding-right: var(--spacing);
-    font-variant-numeric: tabular-nums;
+  .deleted {
+    color: var(--color-deleted);
+    margin-left: var(--spacing);
+  }
+}
 
-    .added {
-      color: var(--color-new);
-    }
+// Summed added/deleted line counts across all changed files (list header).
+.changes-list-total-line-changes {
+  display: flex;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-right: var(--spacing);
+  font-variant-numeric: tabular-nums;
 
-    .deleted {
-      color: var(--color-deleted);
-      margin-left: var(--spacing-half);
-    }
+  .added {
+    color: var(--color-new);
+  }
+
+  .deleted {
+    color: var(--color-deleted);
+    margin-left: var(--spacing);
   }
 }
