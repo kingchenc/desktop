@@ -58,14 +58,20 @@ jobs:
         id: artifact
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path out -Recurse -Filter *.exe |
-                 Where-Object { $_.Name -like '*Setup*' -or $_.FullName -like '*installer*' } |
-                 Select-Object -First 1
+          # yarn package writes the Squirrel installers to dist/
+          $candidates = Get-ChildItem -Path dist -Recurse -Filter *.exe -ErrorAction SilentlyContinue
+          # Prefer the standalone Setup installer; never the bundled helper exes
+          $exe = $candidates | Where-Object { $_.Name -like '*Setup*' } | Select-Object -First 1
           if (-not $exe) {
-            $exe = Get-ChildItem -Path out -Recurse -Filter *.exe | Select-Object -First 1
+            $exe = $candidates | Where-Object { $_.Name -like 'GitHubDesktop*' } | Select-Object -First 1
           }
           if (-not $exe) {
-            Write-Error "No .exe produced under out/"
+            $exe = $candidates | Select-Object -First 1
+          }
+          if (-not $exe) {
+            Write-Host "No installer .exe under dist/. Contents:"
+            Get-ChildItem -Path dist -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
+            Write-Error "No installer .exe produced under dist/"
             exit 1
           }
           "path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
