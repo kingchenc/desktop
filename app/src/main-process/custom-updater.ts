@@ -11,8 +11,12 @@ import * as ipcWebContents from './ipc-webcontents'
  */
 const UpdateRepo = 'kingchenc/desktop'
 
-/** File in userData that remembers the last release tag we acted on. */
-const seenTagFile = () => Path.join(app.getPath('userData'), 'custom-update-tag')
+/**
+ * Path to a downloaded installer that is ready to be applied. Set once an
+ * update has been downloaded; the installer is only run when the user chooses
+ * to restart (never automatically).
+ */
+let pendingInstallerPath: string | null = null
 
 interface ICustomRelease {
   readonly tag: string
@@ -144,44 +148,39 @@ async function fetchLatestRelease(): Promise<ICustomRelease | null> {
   return { tag, assetUrl: exe.browser_download_url }
 }
 
-function readSeenTag(): string | undefined {
-  try {
-    // eslint-disable-next-line no-sync
-    return fs.readFileSync(seenTagFile(), 'utf8').trim() || undefined
-  } catch {
-    return undefined
-  }
-}
-
-function writeSeenTag(tag: string): void {
-  try {
-    // eslint-disable-next-line no-sync
-    fs.writeFileSync(seenTagFile(), tag, 'utf8')
-  } catch (e) {
-    log.warn(`[CustomUpdater] could not persist tag: ${e}`)
-  }
-}
-
 /**
- * Run the downloaded installer silently and quit so it can replace the running
- * version without a write-lock conflict.
+ * Apply a previously downloaded update. Only ever called when the user chooses
+ * to restart - never automatically.
+ *
+ * The installer is launched through a short delay so this process can fully
+ * exit first. Running the full Setup.exe while the app still holds its files
+ * can wipe/corrupt the installation, so we never run it from a live process.
+ * Returns false if there is nothing to install.
  */
-function installSilentlyAndQuit(installerPath: string): void {
-  const child = spawn(installerPath, ['--silent'], {
+export function installPendingCustomUpdate(): boolean {
+  if (pendingInstallerPath === null) {
+    return false
+  }
+
+  // `timeout` gives this app a few seconds to fully quit, then `start` launches
+  // the installer. The empty "" is the required window-title argument.
+  const command = `timeout /t 4 /nobreak >nul & start "" "${pendingInstallerPath}"`
+  const child = spawn('cmd.exe', ['/c', command], {
     detached: true,
     stdio: 'ignore',
   })
   child.unref()
-  // Force-exit (bypassing quit-confirmation handlers) so the file lock is
-  // released and the silent installer can overwrite the running version.
-  app.exit(0)
+
+  app.quit()
+  return true
 }
 
 /**
- * Check the fork's latest release; if it differs from the last one we acted on,
- * download the installer (reporting progress to the renderer over IPC), then
- * install silently and quit. The first run only seeds the baseline so we never
- * auto-install immediately after a fresh install.
+ * Check the fork's latest release. If it differs from the tag THIS build was
+ * packaged as, download the installer (reporting progress) and notify the
+ * renderer that an update is ready. The installer is NEVER run automatically -
+ * the user applies it via the "Restart" action (installPendingCustomUpdate),
+ * which only runs it after the app has exited.
  */
 let checkInFlight = false
 
@@ -189,7 +188,7 @@ export async function checkForCustomUpdates(
   webContents: WebContents
 ): Promise<void> {
   // Guard against overlapping checks (e.g. the launch check and a manual
-  // "Check for Updates" firing together) downloading/installing twice.
+  // "Check for Updates" firing together) downloading twice.
   if (checkInFlight) {
     return
   }
@@ -200,6 +199,12 @@ export async function checkForCustomUpdates(
   ipcWebContents.send(webContents, 'auto-updater-checking-for-update')
 
   try {
+    // Already downloaded this session - just resurface the "ready" state.
+    if (pendingInstallerPath !== null) {
+      ipcWebContents.send(webContents, 'auto-updater-update-downloaded')
+      return
+    }
+
     if (process.platform !== 'win32') {
       ipcWebContents.send(webContents, 'auto-updater-update-not-available')
       return
@@ -212,17 +217,9 @@ export async function checkForCustomUpdates(
       return
     }
 
-    const seen = readSeenTag()
-
-    // First run only seeds the baseline so we never auto-install right after a
-    // fresh install.
-    if (seen === undefined) {
-      writeSeenTag(release.tag)
-      ipcWebContents.send(webContents, 'auto-updater-update-not-available')
-      return
-    }
-
-    if (seen === release.tag) {
+    // Compare against the tag this build was packaged as. An empty tag means a
+    // local/dev build, which never auto-updates.
+    if (__CUSTOM_UPDATE_TAG__ === '' || release.tag === __CUSTOM_UPDATE_TAG__) {
       ipcWebContents.send(webContents, 'auto-updater-update-not-available')
       return
     }
@@ -239,11 +236,11 @@ export async function checkForCustomUpdates(
       ipcWebContents.send(webContents, 'custom-update-progress', progress)
     )
 
-    writeSeenTag(release.tag)
+    // Mark the update as ready, but DO NOT install. The user applies it from
+    // the "Restart" prompt; installing from a live process can corrupt things.
+    pendingInstallerPath = destination
     ipcWebContents.send(webContents, 'auto-updater-update-downloaded')
     ipcWebContents.send(webContents, 'custom-update-ready')
-
-    installSilentlyAndQuit(destination)
   } catch (e) {
     log.warn(`[CustomUpdater] update check failed: ${e}`)
     ipcWebContents.send(

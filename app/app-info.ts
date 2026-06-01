@@ -25,6 +25,7 @@ export function getReplacements() {
     __DEV__: isDevBuild,
     __DEV_SECRETS__: isDevBuild || !process.env.DESKTOP_OAUTH_CLIENT_SECRET,
     __RELEASE_CHANNEL__: s(channel),
+    __CUSTOM_UPDATE_TAG__: s(process.env.CUSTOM_UPDATE_TAG ?? ''),
     __UPDATES_URL__: s(process.env.DESKTOP_E2E_UPDATES_URL ?? getUpdatesURL()),
     __SHA__: s(getSHA()),
     'process.platform': s(process.platform),
