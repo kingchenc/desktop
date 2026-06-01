@@ -69,6 +69,9 @@ describe('IPC channel contract', () => {
     'show-installing-update',
     'install-windows-cli',
     'uninstall-windows-cli',
+    'custom-update-available',
+    'custom-update-progress',
+    'custom-update-ready',
   ] as const
 
   const expectedResponseChannels = [
