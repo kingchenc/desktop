@@ -28,6 +28,12 @@ interface IRepositoryListItemProps {
   /** Number of uncommitted changes */
   readonly changedFilesCount: number
 
+  /** Total added lines in the working directory, if known */
+  readonly linesAdded?: number
+
+  /** Total deleted lines in the working directory, if known */
+  readonly linesDeleted?: number
+
   /** Whether this repository is pinned as a favorite */
   readonly isFavorite: boolean
 
@@ -84,11 +90,32 @@ export class RepositoryListItem extends React.Component<
 
         {this.renderFavoriteToggle()}
 
+        {this.renderLineChanges()}
+
         {repository instanceof Repository &&
           renderRepoIndicators({
             aheadBehind: this.props.aheadBehind,
             hasChanges: hasChanges,
           })}
+      </div>
+    )
+  }
+
+  private renderLineChanges() {
+    const { linesAdded, linesDeleted } = this.props
+
+    if (linesAdded === undefined || linesDeleted === undefined) {
+      return null
+    }
+
+    if (linesAdded === 0 && linesDeleted === 0) {
+      return null
+    }
+
+    return (
+      <div className="repo-line-changes">
+        <span className="added">+{linesAdded}</span>
+        <span className="deleted">-{linesDeleted}</span>
       </div>
     )
   }
@@ -147,7 +174,12 @@ export class RepositoryListItem extends React.Component<
       return (
         nextProps.repository.id !== this.props.repository.id ||
         nextProps.matches !== this.props.matches ||
-        nextProps.isFavorite !== this.props.isFavorite
+        nextProps.isFavorite !== this.props.isFavorite ||
+        nextProps.changedFilesCount !== this.props.changedFilesCount ||
+        nextProps.linesAdded !== this.props.linesAdded ||
+        nextProps.linesDeleted !== this.props.linesDeleted ||
+        nextProps.aheadBehind?.ahead !== this.props.aheadBehind?.ahead ||
+        nextProps.aheadBehind?.behind !== this.props.aheadBehind?.behind
       )
     } else {
       return true

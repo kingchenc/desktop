@@ -172,7 +172,9 @@ function installSilentlyAndQuit(installerPath: string): void {
     stdio: 'ignore',
   })
   child.unref()
-  app.quit()
+  // Force-exit (bypassing quit-confirmation handlers) so the file lock is
+  // released and the silent installer can overwrite the running version.
+  app.exit(0)
 }
 
 /**
@@ -181,31 +183,51 @@ function installSilentlyAndQuit(installerPath: string): void {
  * install silently and quit. The first run only seeds the baseline so we never
  * auto-install immediately after a fresh install.
  */
+let checkInFlight = false
+
 export async function checkForCustomUpdates(
   webContents: WebContents
 ): Promise<void> {
-  if (process.platform !== 'win32') {
+  // Guard against overlapping checks (e.g. the launch check and a manual
+  // "Check for Updates" firing together) downloading/installing twice.
+  if (checkInFlight) {
     return
   }
+  checkInFlight = true
+
+  // Mirror the lifecycle on the existing auto-updater channels so the in-app
+  // update UI (About dialog, menu) reflects the fork check without changes.
+  ipcWebContents.send(webContents, 'auto-updater-checking-for-update')
 
   try {
+    if (process.platform !== 'win32') {
+      ipcWebContents.send(webContents, 'auto-updater-update-not-available')
+      return
+    }
+
     const release = await fetchLatestRelease()
 
     if (release === null) {
+      ipcWebContents.send(webContents, 'auto-updater-update-not-available')
       return
     }
 
     const seen = readSeenTag()
 
+    // First run only seeds the baseline so we never auto-install right after a
+    // fresh install.
     if (seen === undefined) {
       writeSeenTag(release.tag)
+      ipcWebContents.send(webContents, 'auto-updater-update-not-available')
       return
     }
 
     if (seen === release.tag) {
+      ipcWebContents.send(webContents, 'auto-updater-update-not-available')
       return
     }
 
+    ipcWebContents.send(webContents, 'auto-updater-update-available')
     ipcWebContents.send(webContents, 'custom-update-available', release.tag)
 
     const destination = Path.join(
@@ -218,10 +240,18 @@ export async function checkForCustomUpdates(
     )
 
     writeSeenTag(release.tag)
+    ipcWebContents.send(webContents, 'auto-updater-update-downloaded')
     ipcWebContents.send(webContents, 'custom-update-ready')
 
     installSilentlyAndQuit(destination)
   } catch (e) {
     log.warn(`[CustomUpdater] update check failed: ${e}`)
+    ipcWebContents.send(
+      webContents,
+      'auto-updater-error',
+      e instanceof Error ? e : new Error(String(e))
+    )
+  } finally {
+    checkInFlight = false
   }
 }
