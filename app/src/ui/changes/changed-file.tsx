@@ -19,6 +19,10 @@ interface IChangedFileProps {
   readonly focused: boolean
   /** The characters in the file path to highlight */
   readonly matches?: IMatches
+  /** Lines added in this file (working dir vs HEAD), if known */
+  readonly linesAdded?: number
+  /** Lines deleted in this file (working dir vs HEAD), if known */
+  readonly linesDeleted?: number
   readonly onIncludeChanged: (
     file: WorkingDirectoryFileChange,
     include: boolean
@@ -58,13 +62,19 @@ export class ChangedFile extends React.Component<IChangedFileProps, {}> {
     const checkboxWidth = 20
     const statusWidth = 16
     const filePadding = 5
+    const lineChangesWidth =
+      this.props.linesAdded !== undefined &&
+      this.props.linesDeleted !== undefined
+        ? 70
+        : 0
 
     const availablePathWidth =
       availableWidth -
       listItemPadding -
       checkboxWidth -
       filePadding -
-      statusWidth
+      statusWidth -
+      lineChangesWidth
 
     const includedText =
       this.props.include === true
@@ -104,6 +114,9 @@ export class ChangedFile extends React.Component<IChangedFileProps, {}> {
         />
 
         <AriaLiveContainer message={pathScreenReaderMessage} />
+
+        {this.renderLineChanges()}
+
         <TooltippedContent
           ancestorFocused={focused}
           openOnFocus={true}
@@ -115,6 +128,21 @@ export class ChangedFile extends React.Component<IChangedFileProps, {}> {
             className={'status status-' + fileStatus.toLowerCase()}
           />
         </TooltippedContent>
+      </div>
+    )
+  }
+
+  private renderLineChanges() {
+    const { linesAdded, linesDeleted } = this.props
+
+    if (linesAdded === undefined || linesDeleted === undefined) {
+      return null
+    }
+
+    return (
+      <div className="file-line-changes">
+        <span className="added">+{linesAdded}</span>
+        <span className="deleted">-{linesDeleted}</span>
       </div>
     )
   }
