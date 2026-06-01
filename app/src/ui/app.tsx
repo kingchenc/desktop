@@ -355,7 +355,19 @@ export class App extends React.Component<IAppProps, IAppState> {
     })
 
     ipcRenderer.on('custom-update-ready', () => {
-      this.setBanner({ type: BannerType.UpdateProgress, progress: 100 })
+      // The installer has finished downloading. Drop the (non-dismissable)
+      // download-progress banner so the standard "update ready - Restart"
+      // banner can show through; renderBanner gives currentBanner precedence,
+      // so leaving the progress banner up would mask it forever. That banner is
+      // already driven by auto-updater-update-downloaded (UpdateStatus.
+      // UpdateReady) and its Restart action runs the downloaded installer via
+      // quit-and-install-custom-update.
+      if (
+        this.state.currentBanner !== null &&
+        this.state.currentBanner.type === BannerType.UpdateProgress
+      ) {
+        this.props.dispatcher.clearBanner()
+      }
     })
 
     ipcRenderer.on('certificate-error', (_, certificate, error, url) => {
