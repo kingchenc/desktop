@@ -200,6 +200,12 @@ export class AppWindow {
       }
     })
 
+    // Renderer-initiated update checks (e.g. the "Check for Updates" button)
+    // are routed through the fork's custom updater.
+    ipcMain.on('check-for-custom-updates', () =>
+      checkForCustomUpdates(this.window.webContents)
+    )
+
     this.window.on('focus', () =>
       ipcWebContents.send(this.window.webContents, 'focus')
     )
