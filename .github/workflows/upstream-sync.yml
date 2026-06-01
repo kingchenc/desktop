@@ -14,6 +14,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write
 
 env:
   UPSTREAM_URL: https://github.com/desktop/desktop.git
@@ -59,6 +60,24 @@ jobs:
             echo "status=conflict" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Strip upstream non-workflow automation
+        if: steps.rebase.outputs.status == 'ok'
+        run: |
+          # Remove every .github file EXCEPT our own two workflow files. We never
+          # touch .github/workflows/ via git here: the default GITHUB_TOKEN may not
+          # push workflow-file changes, so inherited workflows are handled by the
+          # API disable step below instead. This catches dependabot, probot config,
+          # CODEOWNERS, templates, composite actions, copilot agents/skills, etc.,
+          # including any newly introduced by upstream.
+          find .github -type f ! -path '.github/workflows/*' -delete
+          find .github -mindepth 1 -type d -empty -delete
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "chore: strip upstream non-workflow automation after sync"
+          else
+            echo "Nothing to strip."
+          fi
+
       - name: Push rebased feature branch
         if: steps.rebase.outputs.status == 'ok'
         run: git push origin "$FEATURE_BRANCH" --force-with-lease
@@ -93,3 +112,29 @@ jobs:
           labels: |
             upstream-sync
             conflict
+
+      - name: Disable inherited (non-custom) workflows
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Keep only our own workflows enabled. Every other workflow registered
+          # on the repo (inherited from upstream, or newly added by a sync) is
+          # disabled via the Actions API so it never fires a cron/push trigger.
+          # API-only: this changes no files, so no workflow-scope token is needed.
+          KEEP=".github/workflows/build-and-release.yml .github/workflows/upstream-sync.yml"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows" --paginate \
+            -q '.workflows[] | "\(.id)\t\(.path)\t\(.state)"' \
+          | while IFS=$'\t' read -r id path state; do
+              case " $KEEP " in
+                *" $path "*) echo "keep:    $path ($state)" ;;
+                *)
+                  if [ "$state" = "disabled_manually" ]; then
+                    echo "already: $path"
+                  else
+                    echo "disable: $path"
+                    gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/${id}/disable"
+                  fi
+                  ;;
+              esac
+            done
