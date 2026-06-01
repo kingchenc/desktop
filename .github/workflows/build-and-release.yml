@@ -46,10 +46,16 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Compute release tag
+        shell: bash
+        run: echo "TAG=custom-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
       - name: Build (production)
         run: yarn build:prod
         env:
           NODE_OPTIONS: '--max_old_space_size=4096'
+          # Embed the release tag so the custom updater knows this build's version
+          CUSTOM_UPDATE_TAG: ${{ env.TAG }}
 
       - name: Package (Windows installer)
         run: yarn package
@@ -76,10 +82,6 @@ jobs:
           }
           "path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Installer: $($exe.FullName)"
-
-      - name: Compute release tag
-        shell: bash
-        run: echo "TAG=custom-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
