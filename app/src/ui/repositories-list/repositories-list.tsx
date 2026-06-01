@@ -26,8 +26,12 @@ import { generateRepositoryListContextMenu } from '../repositories-list/reposito
 import { SectionFilterList } from '../lib/section-filter-list'
 import { assertNever } from '../../lib/fatal-error'
 import { IAheadBehind } from '../../models/branch'
+import { getNumberArray, setNumberArray } from '../../lib/local-storage'
 
 const BlankSlateImage = encodePathAsUrl(__dirname, 'static/empty-no-repo.svg')
+
+/** Local storage key holding the ids of the user's pinned repositories. */
+const FavoriteRepositoriesKey = 'favorite-repositories'
 
 interface IRepositoriesListProps {
   readonly selectedRepository: Repositoryish | null
@@ -79,6 +83,9 @@ interface IRepositoriesListProps {
 interface IRepositoriesListState {
   readonly newRepositoryMenuExpanded: boolean
   readonly selectedItem: IRepositoryListItem | null
+
+  /** The ids of the repositories pinned as favorites */
+  readonly favorites: ReadonlySet<number>
 }
 
 const RowHeight = 29
@@ -121,14 +128,16 @@ export class RepositoriesList extends React.Component<
     (
       repositories: ReadonlyArray<Repositoryish> | null,
       localRepositoryStateLookup: ReadonlyMap<number, ILocalRepositoryState>,
-      recentRepositories: ReadonlyArray<number>
+      recentRepositories: ReadonlyArray<number>,
+      favorites: ReadonlySet<number>
     ) =>
       repositories === null
         ? []
         : groupRepositories(
             repositories,
             localRepositoryStateLookup,
-            recentRepositories
+            recentRepositories,
+            favorites
           )
   )
 
@@ -149,7 +158,21 @@ export class RepositoriesList extends React.Component<
     this.state = {
       newRepositoryMenuExpanded: false,
       selectedItem: null,
+      favorites: new Set(getNumberArray(FavoriteRepositoriesKey)),
     }
+  }
+
+  private onToggleFavorite = (repository: Repositoryish) => {
+    const favorites = new Set(this.state.favorites)
+
+    if (favorites.has(repository.id)) {
+      favorites.delete(repository.id)
+    } else {
+      favorites.add(repository.id)
+    }
+
+    setNumberArray(FavoriteRepositoriesKey, Array.from(favorites))
+    this.setState({ favorites })
   }
 
   private renderItem = (item: IRepositoryListItem, matches: IMatches) => {
@@ -162,6 +185,8 @@ export class RepositoriesList extends React.Component<
         matches={matches}
         aheadBehind={item.aheadBehind}
         changedFilesCount={item.changedFilesCount}
+        isFavorite={this.state.favorites.has(repository.id)}
+        onToggleFavorite={this.onToggleFavorite}
       />
     )
   }
@@ -249,6 +274,8 @@ export class RepositoriesList extends React.Component<
       return group.owner.login
     } else if (kind === 'recent') {
       return 'Recent'
+    } else if (kind === 'favorites') {
+      return 'Favorites'
     } else {
       assertNever(kind, `Unknown repository group kind ${kind}`)
     }
@@ -320,7 +347,8 @@ export class RepositoriesList extends React.Component<
     const groups = this.getRepositoryGroups(
       this.props.repositories,
       this.props.localRepositoryStateLookup,
-      this.props.recentRepositories
+      this.props.recentRepositories,
+      this.state.favorites
     )
 
     // So there's two types of selection at play here. There's the repository
@@ -349,6 +377,7 @@ export class RepositoriesList extends React.Component<
           invalidationProps={{
             repositories: this.props.repositories,
             filterText: this.props.filterText,
+            favorites: this.state.favorites,
           }}
           onItemContextMenu={this.onItemContextMenu}
           getGroupAriaLabel={this.getGroupAriaLabelGetter(groups)}
