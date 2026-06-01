@@ -1,0 +1,84 @@
+# Builds the custom GitHub Desktop fork on Windows and publishes a GitHub
+# Release with the generated Setup .exe as a download asset.
+#
+# The build is intentionally UNSIGNED: upstream code-signing is gated behind
+# isPublishable() in script/package.ts, which is false on the custom branch,
+# so no certificates are required.
+#
+# Triggers:
+#   * workflow_dispatch  -> manual first run / patch build
+#   * workflow_run        -> automatically after a successful "Upstream Sync"
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Upstream Sync"]
+    types:
+      - completed
+    branches:
+      - custom
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '24.15.0'
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: custom
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build (production)
+        run: yarn build:prod
+        env:
+          NODE_OPTIONS: '--max_old_space_size=4096'
+
+      - name: Package (Windows installer)
+        run: yarn package
+
+      - name: Locate installer
+        id: artifact
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path out -Recurse -Filter *.exe |
+                 Where-Object { $_.Name -like '*Setup*' -or $_.FullName -like '*installer*' } |
+                 Select-Object -First 1
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path out -Recurse -Filter *.exe | Select-Object -First 1
+          }
+          if (-not $exe) {
+            Write-Error "No .exe produced under out/"
+            exit 1
+          }
+          "path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Installer: $($exe.FullName)"
+
+      - name: Compute release tag
+        shell: bash
+        run: echo "TAG=custom-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: GitHub Desktop Custom Build ${{ env.TAG }}
+          generate_release_notes: true
+          files: ${{ steps.artifact.outputs.path }}
