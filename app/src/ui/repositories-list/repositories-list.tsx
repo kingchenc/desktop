@@ -186,6 +186,8 @@ export class RepositoriesList extends React.Component<
         matches={matches}
         aheadBehind={item.aheadBehind}
         changedFilesCount={item.changedFilesCount}
+        linesAdded={item.linesAdded}
+        linesDeleted={item.linesDeleted}
         isFavorite={this.state.favorites.has(repository.id)}
         onToggleFavorite={this.onToggleFavorite}
       />

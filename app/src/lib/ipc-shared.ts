@@ -90,6 +90,7 @@ export type RequestChannels = {
   'custom-update-available': (version: string) => void
   'custom-update-progress': (progress: number) => void
   'custom-update-ready': () => void
+  'check-for-custom-updates': () => void
 }
 
 /**
