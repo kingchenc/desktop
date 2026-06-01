@@ -22,6 +22,7 @@ import * as path from 'path'
 import windowStateKeeper from 'electron-window-state'
 import * as ipcMain from './ipc-main'
 import * as ipcWebContents from './ipc-webcontents'
+import { checkForCustomUpdates } from './custom-updater'
 import {
   installNotificationCallback,
   terminateDesktopNotifications,
@@ -191,6 +192,12 @@ export class AppWindow {
     ipcMain.once('renderer-ready', (_, readyTime) => {
       this._rendererReadyTime = readyTime
       this.maybeEmitDidLoad()
+
+      // Kick off the custom fork updater once the renderer can receive the
+      // progress events. Skipped in development to avoid hammering the API.
+      if (!__DEV__) {
+        checkForCustomUpdates(this.window.webContents)
+      }
     })
 
     this.window.on('focus', () =>
