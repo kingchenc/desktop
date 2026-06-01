@@ -1,0 +1,95 @@
+# Daily sync of this fork against the upstream desktop/desktop repository.
+# Rebases the custom feature branch onto upstream's development branch and
+# opens a GitHub issue (native bell / e-mail notification) on a merge conflict.
+#
+# Cron and workflow_run triggers only fire when this file lives on the
+# repository's default branch (here: custom).
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  UPSTREAM_URL: https://github.com/desktop/desktop.git
+  UPSTREAM_BRANCH: development
+  FEATURE_BRANCH: custom
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FEATURE_BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH"
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          BEHIND="$(git rev-list --count HEAD..upstream/$UPSTREAM_BRANCH)"
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "Feature branch is $BEHIND commits behind upstream/$UPSTREAM_BRANCH."
+
+      - name: Rebase feature branch onto upstream
+        id: rebase
+        if: steps.check.outputs.behind != '0'
+        run: |
+          if git rebase "upstream/$UPSTREAM_BRANCH"; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          else
+            git rebase --abort || true
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push rebased feature branch
+        if: steps.rebase.outputs.status == 'ok'
+        run: git push origin "$FEATURE_BRANCH" --force-with-lease
+
+      - name: Prepare conflict report
+        if: steps.rebase.outputs.status == 'conflict'
+        run: |
+          {
+            echo "Der automatische Upstream-Sync ist fehlgeschlagen: Beim Rebase von"
+            echo "\`$FEATURE_BRANCH\` auf \`upstream/$UPSTREAM_BRANCH\` ist ein **Merge-Konflikt** aufgetreten."
+            echo ""
+            echo "Upstream (desktop/desktop) hat Code geaendert, der mit den Custom-Patches kollidiert."
+            echo "Bitte lokal manuell aufloesen:"
+            echo ""
+            echo '```bash'
+            echo "git fetch upstream"
+            echo "git checkout $FEATURE_BRANCH"
+            echo "git rebase upstream/$UPSTREAM_BRANCH"
+            echo "# Konflikte aufloesen, git add -A, git rebase --continue"
+            echo "git push origin $FEATURE_BRANCH --force-with-lease"
+            echo '```'
+            echo ""
+            echo "Workflow-Lauf: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > conflict-report.md
+
+      - name: Open issue on conflict
+        if: steps.rebase.outputs.status == 'conflict'
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: '[URGENT] Merge-Konflikt bei GitHub Desktop Upstream-Sync'
+          content-filepath: conflict-report.md
+          labels: |
+            upstream-sync
+            conflict
