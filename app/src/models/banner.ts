@@ -17,6 +17,7 @@ export enum BannerType {
   SuccessfulReorder = 'SuccessfulReorder',
   ConflictsFound = 'ConflictsFound',
   OSVersionNoLongerSupported = 'OSVersionNoLongerSupported',
+  UpdateProgress = 'UpdateProgress',
 }
 
 export type Banner =
@@ -122,3 +123,8 @@ export type Banner =
       readonly onOpenConflictsDialog: () => void
     }
   | { readonly type: BannerType.OSVersionNoLongerSupported }
+  | {
+      readonly type: BannerType.UpdateProgress
+      /** download progress of the pending update, 0-100 */
+      readonly progress: number
+    }
