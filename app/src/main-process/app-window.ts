@@ -22,7 +22,10 @@ import * as path from 'path'
 import windowStateKeeper from 'electron-window-state'
 import * as ipcMain from './ipc-main'
 import * as ipcWebContents from './ipc-webcontents'
-import { checkForCustomUpdates } from './custom-updater'
+import {
+  checkForCustomUpdates,
+  installPendingCustomUpdate,
+} from './custom-updater'
 import {
   installNotificationCallback,
   terminateDesktopNotifications,
@@ -204,6 +207,11 @@ export class AppWindow {
     // are routed through the fork's custom updater.
     ipcMain.on('check-for-custom-updates', () =>
       checkForCustomUpdates(this.window.webContents)
+    )
+
+    // Apply a downloaded fork update when the user chooses to restart.
+    ipcMain.on('quit-and-install-custom-update', () =>
+      installPendingCustomUpdate()
     )
 
     this.window.on('focus', () =>

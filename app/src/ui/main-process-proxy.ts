@@ -167,6 +167,12 @@ export const checkForUpdates = invokeProxy('check-for-updates', 1)
 /** Tell the main process to check the fork's releases for a custom update */
 export const checkForCustomUpdates = sendProxy('check-for-custom-updates', 0)
 
+/** Tell the main process to quit and install a downloaded fork update */
+export const quitAndInstallCustomUpdate = sendProxy(
+  'quit-and-install-custom-update',
+  0
+)
+
 /** Tell the main process to quit the app and install updates */
 export const quitAndInstallUpdate = sendProxy('quit-and-install-updates', 0)
 
