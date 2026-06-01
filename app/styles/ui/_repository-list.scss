@@ -94,6 +94,24 @@
     &:hover .favorite-toggle {
       opacity: 1;
     }
+
+    // Total added/deleted line counts for the repository (working dir vs HEAD).
+    .repo-line-changes {
+      display: flex;
+      flex-shrink: 0;
+      margin-left: var(--spacing-half);
+      font-size: var(--font-size-sm);
+      font-variant-numeric: tabular-nums;
+
+      .added {
+        color: var(--color-new);
+      }
+
+      .deleted {
+        color: var(--color-deleted);
+        margin-left: var(--spacing-half);
+      }
+    }
   }
 
   .filter-list-group-header {
