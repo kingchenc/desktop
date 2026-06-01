@@ -10,7 +10,7 @@ import {
   onAutoUpdaterUpdateAvailable,
   onAutoUpdaterUpdateDownloaded,
   onAutoUpdaterUpdateNotAvailable,
-  quitAndInstallUpdate,
+  quitAndInstallCustomUpdate,
   sendWillQuitSync,
 } from '../main-process-proxy'
 import { ErrorWithMetadata } from '../../lib/error-with-metadata'
@@ -260,7 +260,7 @@ class UpdateStore {
     // before we call the function to quit.
     // eslint-disable-next-line no-sync
     sendWillQuitSync()
-    quitAndInstallUpdate()
+    quitAndInstallCustomUpdate()
   }
 
   private async updatePriorityUpdateStatus() {
