@@ -928,6 +928,62 @@ export async function getBinaryPaths(
   )
 }
 
+/** Added/deleted line counts for a single file. */
+export interface ILineChanges {
+  readonly added: number
+  readonly deleted: number
+}
+
+/**
+ * Get per-file added/deleted line counts for the working directory (tracked
+ * changes vs HEAD), keyed by file path. Untracked files are not included
+ * because they are not part of `git diff HEAD`.
+ */
+export async function getWorkingDirectoryLineChanges(
+  repository: Repository
+): Promise<Map<string, ILineChanges>> {
+  const result = new Map<string, ILineChanges>()
+
+  const { stdout, exitCode } = await git(
+    ['diff', '--numstat', '-z', 'HEAD', '--'],
+    repository.path,
+    'getWorkingDirectoryLineChanges',
+    { successExitCodes: new Set([0, 128]) }
+  )
+
+  if (exitCode !== 0) {
+    // e.g. an unborn HEAD (repository with no commits yet)
+    return result
+  }
+
+  const tokens = stdout.split('\0')
+
+  for (let i = 0; i < tokens.length; i++) {
+    const match = /^(\d+|-)\t(\d+|-)\t(.*)$/.exec(tokens[i])
+
+    if (match === null) {
+      continue
+    }
+
+    const added = match[1] === '-' ? 0 : parseInt(match[1], 10)
+    const deleted = match[2] === '-' ? 0 : parseInt(match[2], 10)
+    let path = match[3]
+
+    // For renames/copies the path field is empty and the old/new paths follow
+    // as two separate NUL-separated tokens; the new path is what we key on.
+    if (path === '') {
+      path = tokens[i + 2] ?? ''
+      i += 2
+    }
+
+    if (path !== '') {
+      result.set(path, { added, deleted })
+    }
+  }
+
+  return result
+}
+
 /**
  * Runs diff --numstat to get the list of files that have changed and which
  * Git have detected as binary files
