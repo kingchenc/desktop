@@ -65,6 +65,35 @@
     .alias {
       font-style: italic;
     }
+
+    // Pin/favorite toggle shown next to the repository name. Kept subtle:
+    // hidden until the row is hovered, always visible once pinned.
+    .favorite-toggle {
+      flex-shrink: 0;
+      margin-left: var(--spacing-half);
+      padding: 0;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      color: var(--text-secondary-color);
+      opacity: 0;
+
+      .octicon {
+        width: 14px;
+        height: 14px;
+      }
+
+      &.favorite {
+        opacity: 1;
+        color: var(--text-color);
+      }
+    }
+
+    &:hover .favorite-toggle {
+      opacity: 1;
+    }
   }
 
   .filter-list-group-header {
