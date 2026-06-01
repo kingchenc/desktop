@@ -47,6 +47,13 @@ declare const __RELEASE_CHANNEL__:
   | 'test'
   | 'development'
 
+/**
+ * The fork release tag this build was packaged as (e.g. custom-2026.06.01-7),
+ * or '' for local/dev builds. Used by the custom updater to detect whether a
+ * newer fork release exists.
+ */
+declare const __CUSTOM_UPDATE_TAG__: string
+
 /** The URL for Squirrel's updates. */
 declare const __UPDATES_URL__: string
 
