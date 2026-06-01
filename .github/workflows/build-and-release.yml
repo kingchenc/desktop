@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout feature branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: custom
           fetch-depth: 0
