@@ -223,6 +223,7 @@ import {
   TerminalOutput,
   HookProgress,
   git,
+  getWorkingDirectoryLineChanges,
 } from '../git'
 import {
   installGlobalLFSFilters,
@@ -424,7 +425,7 @@ const RecentRepositoriesKey = 'recently-selected-repositories'
  *  maximum number of repositories shown in the "Recent" repositories group
  *  in the repository switcher dropdown
  */
-const RecentRepositoriesLength = 3
+const RecentRepositoriesLength = 10
 
 const defaultSidebarWidth: number = 250
 const sidebarWidthConfigKey: string = 'sidebar-width'
@@ -505,9 +506,11 @@ const repositoryIndicatorsEnabledKey = 'enable-repository-indicators'
 const BackgroundFetchMinimumInterval = 30 * 60 * 1000
 
 /**
- * Wait 2 minutes before refreshing repository indicators
+ * Wait 10 seconds before refreshing repository indicators so the change/
+ * ahead-behind dots appear for every repository shortly after launch instead
+ * of only for repositories the user has opened.
  */
-const InitialRepositoryIndicatorTimeout = 2 * 60 * 1000
+const InitialRepositoryIndicatorTimeout = 10 * 1000
 
 const MaxInvalidFoldersToDisplay = 3
 
@@ -3976,9 +3979,25 @@ export class AppStore extends TypedBaseStore<IAppState> {
       return
     }
 
+    let linesAdded = 0
+    let linesDeleted = 0
+
+    try {
+      // Tracked changes only (light) for the repository-list total badge.
+      const lineChanges = await getWorkingDirectoryLineChanges(repository, false)
+      for (const change of lineChanges.values()) {
+        linesAdded += change.added
+        linesDeleted += change.deleted
+      }
+    } catch {
+      // Non-fatal: just omit the line totals for this repository.
+    }
+
     lookup.set(repository.id, {
       aheadBehind: status.branchAheadBehind || null,
       changedFilesCount: status.workingDirectory.files.length,
+      linesAdded,
+      linesDeleted,
     })
   }
   /**
@@ -4023,6 +4042,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
         // We don't need to update changedFilesCount here since it was already
         // set when calling `updateSidebarIndicator()` with the status object.
         changedFilesCount: existing?.changedFilesCount ?? 0,
+        linesAdded: existing?.linesAdded,
+        linesDeleted: existing?.linesDeleted,
       })
       this.emitUpdate()
     }
