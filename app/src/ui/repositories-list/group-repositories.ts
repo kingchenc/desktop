@@ -16,7 +16,7 @@ import { Owner } from '../../models/owner'
 
 export type RepositoryListGroup =
   | {
-      kind: 'recent' | 'other'
+      kind: 'favorites' | 'recent' | 'other'
     }
   | {
       kind: 'dotcom'
@@ -35,6 +35,8 @@ export type RepositoryListGroup =
 export const getGroupKey = (group: RepositoryListGroup) => {
   const { kind } = group
   switch (kind) {
+    case 'favorites':
+      return `-1:favorites`
     case 'recent':
       return `0:recent`
     case 'dotcom':
@@ -77,7 +79,8 @@ type RepoGroupItem = { group: RepositoryListGroup; repos: Repositoryish[] }
 export function groupRepositories(
   repositories: ReadonlyArray<Repositoryish>,
   localRepositoryStateLookup: ReadonlyMap<number, ILocalRepositoryState>,
-  recentRepositories: ReadonlyArray<number>
+  recentRepositories: ReadonlyArray<number>,
+  favoriteRepositories: ReadonlySet<number> = new Set<number>()
 ): ReadonlyArray<IFilterListGroup<IRepositoryListItem, RepositoryListGroup>> {
   const includeRecentGroup = repositories.length > recentRepositoriesThreshold
   const recentSet = includeRecentGroup ? new Set(recentRepositories) : undefined
@@ -95,6 +98,10 @@ export function groupRepositories(
   }
 
   for (const repo of repositories) {
+    if (favoriteRepositories.has(repo.id) && repo instanceof Repository) {
+      addToGroup({ kind: 'favorites' }, repo)
+    }
+
     if (recentSet?.has(repo.id) && repo instanceof Repository) {
       addToGroup({ kind: 'recent' }, repo)
     }
@@ -130,9 +137,12 @@ const toSortedListItems = (
   const allNames = new Map<string, number>()
 
   for (const groupItem of groups.values()) {
-    // All items in the recent group are by definition present in another
-    // group and therefore we don't want to count them.
-    if (groupItem.group.kind === 'recent') {
+    // All items in the recent and favorites groups are by definition present
+    // in another group and therefore we don't want to count them.
+    if (
+      groupItem.group.kind === 'recent' ||
+      groupItem.group.kind === 'favorites'
+    ) {
       continue
     }
 
@@ -161,7 +171,8 @@ const toSortedListItems = (
           // group and has a duplicate name in any group, we need to
           // disambiguate it.
           ((groupNames.get(title) ?? 0) > 1 && group.kind === 'enterprise') ||
-          ((allNames.get(title) ?? 0) > 1 && group.kind === 'recent'),
+          ((allNames.get(title) ?? 0) > 1 &&
+            (group.kind === 'recent' || group.kind === 'favorites')),
         aheadBehind: repoState?.aheadBehind ?? null,
         changedFilesCount: repoState?.changedFilesCount ?? 0,
       }
