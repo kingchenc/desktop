@@ -27,6 +27,12 @@ interface IRepositoryListItemProps {
 
   /** Number of uncommitted changes */
   readonly changedFilesCount: number
+
+  /** Whether this repository is pinned as a favorite */
+  readonly isFavorite: boolean
+
+  /** Called when the favorite (pin) toggle is activated */
+  readonly onToggleFavorite: (repository: Repositoryish) => void
 }
 
 /** A repository item. */
@@ -76,6 +82,8 @@ export class RepositoryListItem extends React.Component<
           />
         </div>
 
+        {this.renderFavoriteToggle()}
+
         {repository instanceof Repository &&
           renderRepoIndicators({
             aheadBehind: this.props.aheadBehind,
@@ -83,6 +91,35 @@ export class RepositoryListItem extends React.Component<
           })}
       </div>
     )
+  }
+
+  private renderFavoriteToggle() {
+    if (!(this.props.repository instanceof Repository)) {
+      return null
+    }
+
+    const { isFavorite } = this.props
+
+    return (
+      <button
+        type="button"
+        className={classNames('favorite-toggle', { favorite: isFavorite })}
+        onClick={this.onToggleFavoriteClick}
+        aria-pressed={isFavorite}
+        aria-label={isFavorite ? 'Unpin repository' : 'Pin repository'}
+        title={isFavorite ? 'Unpin repository' : 'Pin repository'}
+      >
+        <Octicon symbol={isFavorite ? octicons.starFill : octicons.star} />
+      </button>
+    )
+  }
+
+  private onToggleFavoriteClick = (
+    event: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    event.preventDefault()
+    event.stopPropagation()
+    this.props.onToggleFavorite(this.props.repository)
   }
 
   private renderTooltip() {
@@ -109,7 +146,8 @@ export class RepositoryListItem extends React.Component<
     ) {
       return (
         nextProps.repository.id !== this.props.repository.id ||
-        nextProps.matches !== this.props.matches
+        nextProps.matches !== this.props.matches ||
+        nextProps.isFavorite !== this.props.isFavorite
       )
     } else {
       return true
