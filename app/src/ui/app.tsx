@@ -344,6 +344,14 @@ export class App extends React.Component<IAppProps, IAppState> {
       this.props.dispatcher.recordLaunchStats(stats)
     })
 
+    ipcRenderer.on('custom-update-progress', (_, progress) => {
+      this.setBanner({ type: BannerType.UpdateProgress, progress })
+    })
+
+    ipcRenderer.on('custom-update-ready', () => {
+      this.setBanner({ type: BannerType.UpdateProgress, progress: 100 })
+    })
+
     ipcRenderer.on('certificate-error', (_, certificate, error, url) => {
       if (isCertificateErrorSuppressedFor(url)) {
         return
