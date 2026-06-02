@@ -66,8 +66,15 @@ function fetchJson(url: string, redirects = 5): Promise<any> {
   })
 }
 
-/** Download a URL to disk, following redirects and reporting progress 0-100. */
-function downloadFile(
+const UPDATER_USER_AGENT = 'GitHubDesktopCustomUpdater'
+
+// Number of parallel range connections and the size below which the overhead
+// isn't worth it (small assets just use a single stream).
+const PARALLEL_CONNECTIONS = 8
+const MIN_PARALLEL_BYTES = 8 * 1024 * 1024
+
+/** Single-stream download: follow redirects, stream to disk, report 0-100. */
+function downloadFileSingle(
   url: string,
   destination: string,
   onProgress: (progress: number) => void,
@@ -75,53 +82,269 @@ function downloadFile(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     https
+      .get(url, { headers: { 'User-Agent': UPDATER_USER_AGENT } }, res => {
+        const status = res.statusCode ?? 0
+        const location = res.headers.location
+
+        if (status >= 300 && status < 400 && location && redirects > 0) {
+          res.resume()
+          resolve(downloadFileSingle(location, destination, onProgress, redirects - 1))
+          return
+        }
+
+        if (status !== 200) {
+          res.resume()
+          reject(new Error(`Unexpected status code ${status} for ${url}`))
+          return
+        }
+
+        const total = parseInt(res.headers['content-length'] ?? '0', 10)
+        let received = 0
+        let lastReported = -1
+
+        const file = fs.createWriteStream(destination)
+
+        res.on('data', chunk => {
+          received += chunk.length
+          if (total > 0) {
+            const progress = Math.floor((received / total) * 100)
+            if (progress !== lastReported) {
+              lastReported = progress
+              onProgress(progress)
+            }
+          }
+        })
+
+        res.pipe(file)
+
+        file.on('finish', () => file.close(err => (err ? reject(err) : resolve())))
+        file.on('error', reject)
+        res.on('error', reject)
+      })
+      .on('error', reject)
+  })
+}
+
+interface IDownloadProbe {
+  readonly finalUrl: string
+  readonly total: number
+  readonly acceptsRanges: boolean
+}
+
+/**
+ * Follow redirects with a one-byte ranged request to discover the final asset
+ * URL, its total size and whether the server honours range requests. GitHub
+ * release assets redirect github.com -> objects.githubusercontent.com, and the
+ * final host serves 206 Partial Content - which is what lets us parallelise.
+ */
+function probeDownload(url: string, redirects = 5): Promise<IDownloadProbe> {
+  return new Promise((resolve, reject) => {
+    https
       .get(
         url,
-        { headers: { 'User-Agent': 'GitHubDesktopCustomUpdater' } },
+        { headers: { 'User-Agent': UPDATER_USER_AGENT, Range: 'bytes=0-0' } },
+        res => {
+          const status = res.statusCode ?? 0
+          const location = res.headers.location
+          res.resume()
+
+          if (status >= 300 && status < 400 && location && redirects > 0) {
+            resolve(probeDownload(location, redirects - 1))
+            return
+          }
+
+          if (status === 206) {
+            // content-range: "bytes 0-0/<total>"
+            const range = String(res.headers['content-range'] ?? '')
+            const total = parseInt(range.slice(range.indexOf('/') + 1), 10)
+            resolve({ finalUrl: url, total, acceptsRanges: total > 0 })
+            return
+          }
+
+          if (status === 200) {
+            const total = parseInt(res.headers['content-length'] ?? '0', 10)
+            resolve({ finalUrl: url, total, acceptsRanges: false })
+            return
+          }
+
+          reject(new Error(`Unexpected status code ${status} probing ${url}`))
+        }
+      )
+      .on('error', reject)
+  })
+}
+
+/** Download one byte range to its own part file. Only 206 responses accepted. */
+function downloadChunkToFile(
+  url: string,
+  start: number,
+  end: number,
+  partPath: string,
+  onBytes: (count: number) => void,
+  redirects = 3
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    https
+      .get(
+        url,
+        {
+          headers: {
+            'User-Agent': UPDATER_USER_AGENT,
+            Range: `bytes=${start}-${end}`,
+          },
+        },
         res => {
           const status = res.statusCode ?? 0
           const location = res.headers.location
 
           if (status >= 300 && status < 400 && location && redirects > 0) {
             res.resume()
-            resolve(downloadFile(location, destination, onProgress, redirects - 1))
+            resolve(
+              downloadChunkToFile(location, start, end, partPath, onBytes, redirects - 1)
+            )
             return
           }
 
-          if (status !== 200) {
+          // A 200 here means the server ignored the range and would send the
+          // whole file into this part - unusable for a parallel assembly.
+          if (status !== 206) {
             res.resume()
-            reject(new Error(`Unexpected status code ${status} for ${url}`))
+            reject(new Error(`Expected 206 for range ${start}-${end}, got ${status}`))
             return
           }
 
-          const total = parseInt(res.headers['content-length'] ?? '0', 10)
-          let received = 0
-          let lastReported = -1
-
-          const file = fs.createWriteStream(destination)
-
-          res.on('data', chunk => {
-            received += chunk.length
-            if (total > 0) {
-              const progress = Math.floor((received / total) * 100)
-              if (progress !== lastReported) {
-                lastReported = progress
-                onProgress(progress)
-              }
-            }
-          })
-
+          const file = fs.createWriteStream(partPath)
+          res.on('data', chunk => onBytes(chunk.length))
           res.pipe(file)
-
-          file.on('finish', () =>
-            file.close(err => (err ? reject(err) : resolve()))
-          )
+          file.on('finish', () => file.close(err => (err ? reject(err) : resolve())))
           file.on('error', reject)
           res.on('error', reject)
         }
       )
       .on('error', reject)
   })
+}
+
+/**
+ * Download an asset in parallel byte ranges, then concatenate the parts. GitHub
+ * throttles per connection, so several ranges at once recover full bandwidth
+ * (the same trick a multi-connection download manager uses). Part files are
+ * always cleaned up, even on failure.
+ */
+async function downloadParallel(
+  finalUrl: string,
+  total: number,
+  destination: string,
+  onProgress: (progress: number) => void,
+  connections: number
+): Promise<void> {
+  const chunkSize = Math.ceil(total / connections)
+  const parts = new Array<{ path: string; start: number; end: number; index: number }>()
+
+  for (let i = 0; i < connections; i++) {
+    const start = i * chunkSize
+    if (start >= total) {
+      break
+    }
+    const end = Math.min(start + chunkSize - 1, total - 1)
+    parts.push({ path: `${destination}.part${i}`, start, end, index: i })
+  }
+
+  // Per-chunk byte counters so a retried chunk simply overwrites its own count
+  // instead of double-reporting aggregate progress.
+  const chunkBytes = new Array<number>(parts.length).fill(0)
+  let lastReported = -1
+  const report = () => {
+    const received = chunkBytes.reduce((a, b) => a + b, 0)
+    const progress = Math.floor((received / total) * 100)
+    if (progress !== lastReported) {
+      lastReported = progress
+      onProgress(progress)
+    }
+  }
+
+  const downloadWithRetry = async (part: {
+    path: string
+    start: number
+    end: number
+    index: number
+  }) => {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 3; attempt++) {
+      chunkBytes[part.index] = 0
+      report()
+      try {
+        await downloadChunkToFile(finalUrl, part.start, part.end, part.path, count => {
+          chunkBytes[part.index] += count
+          report()
+        })
+        return
+      } catch (e) {
+        lastError = e
+      }
+    }
+    throw lastError
+  }
+
+  const cleanup = async () => {
+    for (const part of parts) {
+      try {
+        await fs.promises.unlink(part.path)
+      } catch {
+        // part may not exist if its download never started - ignore.
+      }
+    }
+  }
+
+  try {
+    await Promise.all(parts.map(downloadWithRetry))
+
+    // Concatenate the parts (already in offset order) into the destination.
+    await fs.promises.writeFile(destination, Buffer.alloc(0))
+    for (const part of parts) {
+      await fs.promises.appendFile(destination, await fs.promises.readFile(part.path))
+    }
+  } finally {
+    await cleanup()
+  }
+}
+
+/**
+ * Download a URL to disk reporting progress 0-100. Tries a parallel multi-range
+ * download (much faster against GitHub's per-connection throttling) and falls
+ * back to a single stream if the asset is small or the server doesn't support
+ * ranges, or if the parallel attempt fails for any reason.
+ */
+async function downloadFile(
+  url: string,
+  destination: string,
+  onProgress: (progress: number) => void
+): Promise<void> {
+  try {
+    const probe = await probeDownload(url)
+
+    if (
+      !probe.acceptsRanges ||
+      probe.total < MIN_PARALLEL_BYTES ||
+      PARALLEL_CONNECTIONS <= 1
+    ) {
+      await downloadFileSingle(url, destination, onProgress)
+      return
+    }
+
+    await downloadParallel(
+      probe.finalUrl,
+      probe.total,
+      destination,
+      onProgress,
+      PARALLEL_CONNECTIONS
+    )
+  } catch (e) {
+    log.warn(
+      `[CustomUpdater] parallel download failed, falling back to single stream: ${e}`
+    )
+    await downloadFileSingle(url, destination, onProgress)
+  }
 }
 
 async function fetchLatestRelease(): Promise<ICustomRelease | null> {
