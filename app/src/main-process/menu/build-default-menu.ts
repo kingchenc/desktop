@@ -606,9 +606,12 @@ export function buildDefaultMenu({
   // build is identifiable as the modified fork. GitHub Desktop's custom Windows
   // menu bar only renders top-level items that carry a submenu (app-menu-bar.tsx
   // filters to type 'submenuItem'), so a bare label would never show - it must
-  // be a submenu.
+  // be a submenu. The label carries the auto-incrementing build number from the
+  // embedded update tag (e.g. "custom-2026.06.02-15" -> "15"); "dev" on local
+  // builds where no tag is baked in.
+  const forkVersion = __CUSTOM_UPDATE_TAG__.split('-').pop() || 'dev'
   template.push({
-    label: 'Modified by KingchenC',
+    label: `Modified by KingchenC | v-${forkVersion}`,
     submenu: [
       {
         label: 'Custom fork - github.com/kingchenc/desktop',
