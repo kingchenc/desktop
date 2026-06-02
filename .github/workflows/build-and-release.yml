@@ -26,8 +26,62 @@ env:
   NODE_VERSION: '24.15.0'
 
 jobs:
-  build:
+  # Gate: only build/release when the custom branch actually advanced since the
+  # last release. The daily Upstream Sync completes successfully even when there
+  # were no upstream commits, which would otherwise trigger a byte-identical
+  # rebuild and a phantom "update available" prompt every day. Comparing the
+  # current custom HEAD against the commit the latest release points at skips
+  # those no-op runs.
+  gate:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: custom
+          fetch-depth: 0
+
+      - name: Decide whether anything changed since the last release
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          head_sha="$(git rev-parse HEAD)"
+          latest_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)"
+
+          if [ -z "$latest_tag" ]; then
+            echo "No previous release found - building."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Resolve the commit the latest release tag points at. action-gh-release
+          # creates a lightweight tag, so the ref object is the commit directly;
+          # dereference defensively in case it is ever an annotated tag object.
+          ref_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$latest_tag" -q '.object.sha' 2>/dev/null || true)"
+          ref_type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$latest_tag" -q '.object.type' 2>/dev/null || true)"
+          if [ "$ref_type" = "tag" ]; then
+            ref_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" -q '.object.sha' 2>/dev/null || true)"
+          fi
+
+          echo "custom HEAD          : $head_sha"
+          echo "release $latest_tag : $ref_sha"
+
+          if [ -n "$ref_sha" ] && [ "$head_sha" = "$ref_sha" ]; then
+            echo "Custom branch unchanged since $latest_tag - skipping build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.skip != 'true'
     runs-on: windows-2022
 
     steps:
@@ -49,14 +103,16 @@ jobs:
       - name: Apply custom branding
         shell: bash
         run: |
-          # Pin the "Modified by KingchenC" menu-bar label into every released
+          # Pin the "Modified by KingchenC" menu-bar entry into every released
           # build, independent of whether the source-level branding commit
-          # survives an upstream rebase. Idempotent: if the label is already
-          # present nothing is inserted. The trailing grep fails the build
-          # loudly if the anchor ever disappears instead of shipping unbranded.
+          # survives an upstream rebase. It must be a submenu: the custom Windows
+          # menu bar only renders top-level items of type 'submenuItem'.
+          # Idempotent: if the entry is already present nothing is inserted. The
+          # trailing grep fails the build loudly if the anchor ever disappears
+          # instead of shipping unbranded.
           f=app/src/main-process/menu/build-default-menu.ts
           if ! grep -q 'Modified by KingchenC' "$f"; then
-            perl -0pi -e 's/(\n\s*ensureItemIds\(template\))/\n  template.push({ label: "Modified by KingchenC", enabled: false })$1/' "$f"
+            perl -0pi -e 's|(\n\s*ensureItemIds\(template\))|\n  template.push({ label: "Modified by KingchenC", submenu: [{ label: "Custom fork - github.com/kingchenc/desktop", enabled: false }] })$1|' "$f"
           fi
           grep -q 'Modified by KingchenC' "$f"
           echo "Custom menu branding applied."
