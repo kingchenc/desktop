@@ -162,15 +162,30 @@ export function installPendingCustomUpdate(): boolean {
     return false
   }
 
-  // Wait a few seconds for this app to fully exit, then launch the installer.
+  // Wait for this app to fully exit, run the installer, then relaunch the app.
+  //
   // We use PowerShell instead of `cmd /c "... & start \"\" \"path\""` for two
   // reasons: Node's cmd argument escaping mangles the quotes around the path
   // (which produced the "file not found" / stray-backslash error), and `timeout`
-  // aborts immediately when stdin is not a console. Start-Sleep + Start-Process
-  // are robust to both. The path is single-quoted with '' escaping so spaces and
-  // other special characters can't break out of the literal.
+  // aborts immediately when stdin is not a console.
+  //
+  // The relaunch is explicit: the fork never bumps its package.json version, so
+  // Squirrel treats every update as a same-version reinstall and does NOT
+  // relaunch the app itself - without this the installer would apply silently
+  // and leave the app closed. `-Wait` sequences the install before the
+  // relaunch, which targets the stable root launcher (one level above the
+  // versioned app-x directory) so it always starts the freshly installed build.
+  // Paths are single-quoted with '' escaping so spaces or special characters
+  // can't break out of the literal.
   const installerPath = pendingInstallerPath.replace(/'/g, "''")
-  const psCommand = `Start-Sleep -Seconds 4; Start-Process -FilePath '${installerPath}'`
+  const launcherPath = Path.join(
+    Path.dirname(Path.dirname(process.execPath)),
+    Path.basename(process.execPath)
+  ).replace(/'/g, "''")
+  const psCommand =
+    `Start-Sleep -Seconds 4; ` +
+    `Start-Process -FilePath '${installerPath}' -Wait; ` +
+    `Start-Process -FilePath '${launcherPath}'`
   const child = spawn(
     'powershell.exe',
     [
