@@ -612,7 +612,11 @@ export function buildDefaultMenu({
     submenu: [
       {
         label: 'Custom fork - github.com/kingchenc/desktop',
-        enabled: false,
+        click() {
+          shell
+            .openExternal('https://github.com/kingchenc/desktop')
+            .catch(err => log.error('Failed opening fork page', err))
+        },
       },
     ],
   })
