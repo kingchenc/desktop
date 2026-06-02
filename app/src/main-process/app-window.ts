@@ -209,9 +209,11 @@ export class AppWindow {
       checkForCustomUpdates(this.window.webContents)
     )
 
-    // Apply a downloaded fork update when the user chooses to restart.
+    // Apply a downloaded fork update when the user chooses to restart. Pass the
+    // webContents so a failure (nothing downloaded, installer missing, helper
+    // could not start) is surfaced in the UI instead of silently doing nothing.
     ipcMain.on('quit-and-install-custom-update', () =>
-      installPendingCustomUpdate()
+      installPendingCustomUpdate(this.window.webContents)
     )
 
     this.window.on('focus', () =>
