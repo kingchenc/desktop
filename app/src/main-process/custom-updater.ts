@@ -375,68 +375,140 @@ async function fetchLatestRelease(): Promise<ICustomRelease | null> {
  * Apply a previously downloaded update. Only ever called when the user chooses
  * to restart - never automatically.
  *
- * The installer is launched through a short delay so this process can fully
- * exit first. Running the full Setup.exe while the app still holds its files
- * can wipe/corrupt the installation, so we never run it from a live process.
- * Returns false if there is nothing to install.
+ * The work is handed to a single, detached, HIDDEN PowerShell helper so this
+ * process can fully exit before the installer touches the installation. Running
+ * the full Setup.exe while the app still holds its files makes Squirrel skip the
+ * real upgrade, so we never run it from a live process.
+ *
+ * Returns false (and surfaces an error to the renderer) if there is nothing
+ * valid to install; returns true once the helper has been launched and the app
+ * has been asked to quit.
  */
-export function installPendingCustomUpdate(): boolean {
-  if (pendingInstallerPath === null) {
+export function installPendingCustomUpdate(webContents?: WebContents): boolean {
+  const tempDir = app.getPath('temp')
+  const logPath = Path.join(tempDir, 'github-desktop-custom-update.log')
+
+  // Node-side breadcrumb so a failure is always diagnosable even if the helper
+  // never starts - the previous implementation logged ONLY from inside the
+  // spawned PowerShell, so a silent spawn failure left no trace at all.
+  const appendLog = (line: string) => {
+    try {
+      fs.appendFileSync(logPath, `${new Date().toISOString()} ${line}\r\n`)
+    } catch {
+      // Logging must never block applying an update.
+    }
+  }
+
+  const fail = (message: string, error?: unknown) => {
+    appendLog(error ? `${message}: ${error}` : message)
+    log.error(`[CustomUpdater] ${message}`, error instanceof Error ? error : undefined)
+    if (webContents !== undefined) {
+      ipcWebContents.send(
+        webContents,
+        'auto-updater-error',
+        new Error(`Could not apply the downloaded update: ${message}`)
+      )
+    }
     return false
   }
 
-  // Hand the install off to a single, detached, HIDDEN PowerShell that waits
-  // for THIS process to exit (by PID), runs the installer, then relaunches the
-  // app.
-  //
-  // Waiting on the exact PID via Wait-Process is the key: Squirrel's Setup.exe
-  // only performs the upgrade once the old app is fully gone - if it is still
-  // alive the installer bails to "already running, just launch" and never
-  // applies the new version (a fixed sleep wasn't reliable). Doing it in one
-  // hidden PowerShell means no flashing console windows - the previous batch
-  // spawned a visible tasklist/ping/find loop. The installer itself is started
-  // visibly so any OS prompt (SmartScreen on the unsigned build) is shown, and
-  // each step is written to a log for diagnosis.
-  const tempDir = app.getPath('temp')
-  const logPath = Path.join(tempDir, 'github-desktop-custom-update.log')
+  if (pendingInstallerPath === null) {
+    return fail('no update has been downloaded to install')
+  }
+
+  const installerPath = pendingInstallerPath
+
+  if (!fs.existsSync(installerPath)) {
+    pendingInstallerPath = null
+    return fail(`the downloaded installer is missing: ${installerPath}`)
+  }
+
+  // Start a fresh log for this attempt (a stale log from a prior session is
+  // misleading when diagnosing "nothing happened").
+  try {
+    fs.writeFileSync(logPath, '')
+  } catch {
+    // ignore - appendLog below is best-effort too.
+  }
+  appendLog(`install starting: installer=${installerPath} pid=${process.pid}`)
+
+  // The Squirrel root-stub launcher (one directory above app-x.y.z) used as a
+  // safety net if Setup.exe does not relaunch the app itself.
   const launcher = Path.join(
     Path.dirname(Path.dirname(process.execPath)),
     Path.basename(process.execPath)
   )
 
+  // Resolve powershell.exe by absolute path rather than relying on PATH, which
+  // is not guaranteed in every launch context (a missing PATH entry would make
+  // spawn() fail silently and the update would never apply).
+  const powershell = Path.join(
+    process.env.SystemRoot || 'C:\\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe'
+  )
+
   const psQuote = (value: string) => value.replace(/'/g, "''")
   const escLog = psQuote(logPath)
-  const psCommand = [
+
+  // The helper, in order:
+  //   1. wait for THIS process (the Electron main) to exit, and
+  //   2. wait until NO GitHubDesktop.exe remains. Electron leaves several
+  //      helper processes (GPU/renderer/utility/crashpad) that share that image
+  //      name and exit slightly after the main process. GitHub Desktop's
+  //      Squirrel Setup.exe only runs ApplyReleases (the real upgrade) when the
+  //      app is fully gone - otherwise it does housekeeping (updateSelf +
+  //      createShortcut) and silently skips the new version. Waiting on the
+  //      main PID alone (the previous approach) did not close this gap.
+  //   3. run the installer visibly (Squirrel shows its progress and auto-starts
+  //      the new app), then
+  //   4. only relaunch as a safety net if the app is not already running.
+  // All waiting uses in-process cmdlets (Wait-Process / Get-Process), so there
+  // are no flashing console windows like the old tasklist/ping batch loop.
+  const psScript = [
     `$ErrorActionPreference='SilentlyContinue'`,
-    `Set-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) waiting for pid ${process.pid}" -Encoding utf8`,
-    `Wait-Process -Id ${process.pid} -Timeout 120`,
-    `Add-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) running installer"`,
+    `function Log($m){ Add-Content -LiteralPath '${escLog}' -Value ("{0} {1}" -f (Get-Date -Format o), $m) }`,
+    `Log 'waiting for app pid ${process.pid}'`,
+    `try { Wait-Process -Id ${process.pid} -Timeout 120 -ErrorAction Stop } catch { Log 'pid wait ended (already exited or timed out)' }`,
+    `for ($i=0; $i -lt 120; $i++) { if (-not (Get-Process -Name GitHubDesktop -ErrorAction SilentlyContinue)) { break }; Start-Sleep -Milliseconds 500 }`,
+    `Log 'app fully stopped; running installer'`,
     `$proc = Start-Process -FilePath '${psQuote(
-      pendingInstallerPath
+      installerPath
     )}' -Wait -PassThru`,
-    `Add-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) installer exit $($proc.ExitCode)"`,
-    `Start-Process -FilePath '${psQuote(launcher)}'`,
-    `Add-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) relaunched"`,
+    `Log ('installer exit ' + $proc.ExitCode)`,
+    `Start-Sleep -Seconds 3`,
+    `if (Get-Process -Name GitHubDesktop -ErrorAction SilentlyContinue) { Log 'app already running after install' } else { Log 'relaunching app'; Start-Process -FilePath '${psQuote(
+      launcher
+    )}' }`,
+    `Log 'done'`,
   ].join('; ')
 
-  const child = spawn(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-WindowStyle',
-      'Hidden',
-      '-Command',
-      psCommand,
-    ],
-    {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }
-  )
-  child.unref()
+  try {
+    const child = spawn(
+      powershell,
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-WindowStyle',
+        'Hidden',
+        '-Command',
+        psScript,
+      ],
+      {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      }
+    )
+    child.on('error', err => fail('failed to launch the update helper', err))
+    child.unref()
+  } catch (e) {
+    return fail('could not start the update helper', e)
+  }
 
+  appendLog('update helper launched; quitting app')
   app.quit()
   return true
 }
