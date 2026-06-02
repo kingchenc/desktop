@@ -162,13 +162,31 @@ export function installPendingCustomUpdate(): boolean {
     return false
   }
 
-  // `timeout` gives this app a few seconds to fully quit, then `start` launches
-  // the installer. The empty "" is the required window-title argument.
-  const command = `timeout /t 4 /nobreak >nul & start "" "${pendingInstallerPath}"`
-  const child = spawn('cmd.exe', ['/c', command], {
-    detached: true,
-    stdio: 'ignore',
-  })
+  // Wait a few seconds for this app to fully exit, then launch the installer.
+  // We use PowerShell instead of `cmd /c "... & start \"\" \"path\""` for two
+  // reasons: Node's cmd argument escaping mangles the quotes around the path
+  // (which produced the "file not found" / stray-backslash error), and `timeout`
+  // aborts immediately when stdin is not a console. Start-Sleep + Start-Process
+  // are robust to both. The path is single-quoted with '' escaping so spaces and
+  // other special characters can't break out of the literal.
+  const installerPath = pendingInstallerPath.replace(/'/g, "''")
+  const psCommand = `Start-Sleep -Seconds 4; Start-Process -FilePath '${installerPath}'`
+  const child = spawn(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
+      '-Command',
+      psCommand,
+    ],
+    {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    }
+  )
   child.unref()
 
   app.quit()
