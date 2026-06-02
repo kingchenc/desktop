@@ -400,16 +400,29 @@ export function installPendingCustomUpdate(): boolean {
   const tempDir = app.getPath('temp')
   const logPath = Path.join(tempDir, 'github-desktop-custom-update.log')
   const batchPath = Path.join(tempDir, 'github-desktop-custom-update.cmd')
+  const exeName = Path.basename(process.execPath)
   const launcher = Path.join(
     Path.dirname(Path.dirname(process.execPath)),
-    Path.basename(process.execPath)
+    exeName
   )
 
   const batch = [
     '@echo off',
     `echo [%date% %time%] update starting > "${logPath}"`,
-    'ping -n 5 127.0.0.1 >nul 2>&1',
-    `echo [%date% %time%] running installer >> "${logPath}"`,
+    // Wait until this app has FULLY exited before running the installer. If the
+    // process is still alive Squirrel's Setup.exe bails to "already running,
+    // just launch" mode and never applies the new version - which is exactly
+    // why a fixed sleep failed. Poll tasklist, capped so we can never hang.
+    'set /a tries=0',
+    ':waitloop',
+    `tasklist /fi "imagename eq ${exeName}" 2>nul | find /i "${exeName}" >nul`,
+    'if errorlevel 1 goto exited',
+    'set /a tries+=1',
+    'if %tries% geq 30 goto exited',
+    'ping -n 3 127.0.0.1 >nul 2>&1',
+    'goto waitloop',
+    ':exited',
+    `echo [%date% %time%] app exited after %tries% checks, running installer >> "${logPath}"`,
     `"${pendingInstallerPath}" >> "${logPath}" 2>&1`,
     `echo [%date% %time%] installer exit code %errorlevel% >> "${logPath}"`,
     `echo [%date% %time%] relaunching app >> "${logPath}"`,
