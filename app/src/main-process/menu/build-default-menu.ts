@@ -602,6 +602,13 @@ export function buildDefaultMenu({
     })
   }
 
+  // Custom fork branding: a disabled top-level label pinned to the menu bar so
+  // every build is identifiable as the modified fork at a glance.
+  template.push({
+    label: 'Modified by KingchenC',
+    enabled: false,
+  })
+
   ensureItemIds(template)
 
   return Menu.buildFromTemplate(template)
