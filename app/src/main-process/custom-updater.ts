@@ -385,46 +385,50 @@ export function installPendingCustomUpdate(): boolean {
     return false
   }
 
-  // Wait for this app to fully exit, run the installer, then relaunch the app.
-  //
-  // We use PowerShell instead of `cmd /c "... & start \"\" \"path\""` for two
-  // reasons: Node's cmd argument escaping mangles the quotes around the path
-  // (which produced the "file not found" / stray-backslash error), and `timeout`
-  // aborts immediately when stdin is not a console.
-  //
-  // The relaunch is explicit: the fork never bumps its package.json version, so
-  // Squirrel treats every update as a same-version reinstall and does NOT
-  // relaunch the app itself - without this the installer would apply silently
-  // and leave the app closed. `-Wait` sequences the install before the
-  // relaunch, which targets the stable root launcher (one level above the
-  // versioned app-x directory) so it always starts the freshly installed build.
-  // Paths are single-quoted with '' escaping so spaces or special characters
-  // can't break out of the literal.
-  const installerPath = pendingInstallerPath.replace(/'/g, "''")
-  const launcherPath = Path.join(
+  // Hand the install off to a detached batch script that waits for this app to
+  // exit, runs the installer, then relaunches the app. A batch file is used
+  // (rather than an inline `cmd /c "..."` or PowerShell -Command) because:
+  //   * passing a single script path avoids Node's cmd quote-mangling, which
+  //     previously corrupted the installer path ("file not found"),
+  //   * `ping` provides the settle delay without needing a console (unlike
+  //     `timeout`), and
+  //   * every step is logged to a file so a failed update is diagnosable.
+  // The installer is launched visibly so any OS prompt (e.g. SmartScreen for
+  // the unsigned build) is shown rather than blocking invisibly. The relaunch
+  // targets the stable root launcher (one level above the versioned app-x dir)
+  // so it starts whatever build was just installed.
+  const tempDir = app.getPath('temp')
+  const logPath = Path.join(tempDir, 'github-desktop-custom-update.log')
+  const batchPath = Path.join(tempDir, 'github-desktop-custom-update.cmd')
+  const launcher = Path.join(
     Path.dirname(Path.dirname(process.execPath)),
     Path.basename(process.execPath)
-  ).replace(/'/g, "''")
-  const psCommand =
-    `Start-Sleep -Seconds 4; ` +
-    `Start-Process -FilePath '${installerPath}' -Wait; ` +
-    `Start-Process -FilePath '${launcherPath}'`
-  const child = spawn(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-WindowStyle',
-      'Hidden',
-      '-Command',
-      psCommand,
-    ],
-    {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }
   )
+
+  const batch = [
+    '@echo off',
+    `echo [%date% %time%] update starting > "${logPath}"`,
+    'ping -n 5 127.0.0.1 >nul 2>&1',
+    `echo [%date% %time%] running installer >> "${logPath}"`,
+    `"${pendingInstallerPath}" >> "${logPath}" 2>&1`,
+    `echo [%date% %time%] installer exit code %errorlevel% >> "${logPath}"`,
+    `echo [%date% %time%] relaunching app >> "${logPath}"`,
+    `start "" "${launcher}"`,
+    `echo [%date% %time%] done >> "${logPath}"`,
+  ].join('\r\n')
+
+  try {
+    fs.writeFileSync(batchPath, batch, 'utf8')
+  } catch (e) {
+    log.error(`[CustomUpdater] failed to write update script: ${e}`)
+    return false
+  }
+
+  const child = spawn('cmd.exe', ['/c', batchPath], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
   child.unref()
 
   app.quit()
