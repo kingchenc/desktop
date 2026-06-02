@@ -46,6 +46,21 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Apply custom branding
+        shell: bash
+        run: |
+          # Pin the "Modified by KingchenC" menu-bar label into every released
+          # build, independent of whether the source-level branding commit
+          # survives an upstream rebase. Idempotent: if the label is already
+          # present nothing is inserted. The trailing grep fails the build
+          # loudly if the anchor ever disappears instead of shipping unbranded.
+          f=app/src/main-process/menu/build-default-menu.ts
+          if ! grep -q 'Modified by KingchenC' "$f"; then
+            perl -0pi -e 's/(\n\s*ensureItemIds\(template\))/\n  template.push({ label: "Modified by KingchenC", enabled: false })$1/' "$f"
+          fi
+          grep -q 'Modified by KingchenC' "$f"
+          echo "Custom menu branding applied."
+
       - name: Compute release tag
         shell: bash
         run: echo "TAG=custom-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
