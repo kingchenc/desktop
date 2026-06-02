@@ -385,63 +385,56 @@ export function installPendingCustomUpdate(): boolean {
     return false
   }
 
-  // Hand the install off to a detached batch script that waits for this app to
-  // exit, runs the installer, then relaunches the app. A batch file is used
-  // (rather than an inline `cmd /c "..."` or PowerShell -Command) because:
-  //   * passing a single script path avoids Node's cmd quote-mangling, which
-  //     previously corrupted the installer path ("file not found"),
-  //   * `ping` provides the settle delay without needing a console (unlike
-  //     `timeout`), and
-  //   * every step is logged to a file so a failed update is diagnosable.
-  // The installer is launched visibly so any OS prompt (e.g. SmartScreen for
-  // the unsigned build) is shown rather than blocking invisibly. The relaunch
-  // targets the stable root launcher (one level above the versioned app-x dir)
-  // so it starts whatever build was just installed.
+  // Hand the install off to a single, detached, HIDDEN PowerShell that waits
+  // for THIS process to exit (by PID), runs the installer, then relaunches the
+  // app.
+  //
+  // Waiting on the exact PID via Wait-Process is the key: Squirrel's Setup.exe
+  // only performs the upgrade once the old app is fully gone - if it is still
+  // alive the installer bails to "already running, just launch" and never
+  // applies the new version (a fixed sleep wasn't reliable). Doing it in one
+  // hidden PowerShell means no flashing console windows - the previous batch
+  // spawned a visible tasklist/ping/find loop. The installer itself is started
+  // visibly so any OS prompt (SmartScreen on the unsigned build) is shown, and
+  // each step is written to a log for diagnosis.
   const tempDir = app.getPath('temp')
   const logPath = Path.join(tempDir, 'github-desktop-custom-update.log')
-  const batchPath = Path.join(tempDir, 'github-desktop-custom-update.cmd')
-  const exeName = Path.basename(process.execPath)
   const launcher = Path.join(
     Path.dirname(Path.dirname(process.execPath)),
-    exeName
+    Path.basename(process.execPath)
   )
 
-  const batch = [
-    '@echo off',
-    `echo [%date% %time%] update starting > "${logPath}"`,
-    // Wait until this app has FULLY exited before running the installer. If the
-    // process is still alive Squirrel's Setup.exe bails to "already running,
-    // just launch" mode and never applies the new version - which is exactly
-    // why a fixed sleep failed. Poll tasklist, capped so we can never hang.
-    'set /a tries=0',
-    ':waitloop',
-    `tasklist /fi "imagename eq ${exeName}" 2>nul | find /i "${exeName}" >nul`,
-    'if errorlevel 1 goto exited',
-    'set /a tries+=1',
-    'if %tries% geq 30 goto exited',
-    'ping -n 3 127.0.0.1 >nul 2>&1',
-    'goto waitloop',
-    ':exited',
-    `echo [%date% %time%] app exited after %tries% checks, running installer >> "${logPath}"`,
-    `"${pendingInstallerPath}" >> "${logPath}" 2>&1`,
-    `echo [%date% %time%] installer exit code %errorlevel% >> "${logPath}"`,
-    `echo [%date% %time%] relaunching app >> "${logPath}"`,
-    `start "" "${launcher}"`,
-    `echo [%date% %time%] done >> "${logPath}"`,
-  ].join('\r\n')
+  const psQuote = (value: string) => value.replace(/'/g, "''")
+  const escLog = psQuote(logPath)
+  const psCommand = [
+    `$ErrorActionPreference='SilentlyContinue'`,
+    `Set-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) waiting for pid ${process.pid}" -Encoding utf8`,
+    `Wait-Process -Id ${process.pid} -Timeout 120`,
+    `Add-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) running installer"`,
+    `$proc = Start-Process -FilePath '${psQuote(
+      pendingInstallerPath
+    )}' -Wait -PassThru`,
+    `Add-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) installer exit $($proc.ExitCode)"`,
+    `Start-Process -FilePath '${psQuote(launcher)}'`,
+    `Add-Content -LiteralPath '${escLog}' -Value "$(Get-Date -Format o) relaunched"`,
+  ].join('; ')
 
-  try {
-    fs.writeFileSync(batchPath, batch, 'utf8')
-  } catch (e) {
-    log.error(`[CustomUpdater] failed to write update script: ${e}`)
-    return false
-  }
-
-  const child = spawn('cmd.exe', ['/c', batchPath], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  })
+  const child = spawn(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
+      '-Command',
+      psCommand,
+    ],
+    {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    }
+  )
   child.unref()
 
   app.quit()
