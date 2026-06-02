@@ -483,18 +483,40 @@ export function installPendingCustomUpdate(webContents?: WebContents): boolean {
       launcher
     )}' }`,
     `Log 'done'`,
-  ].join('; ')
+  ].join('\r\n')
+
+  // Write the helper to a .ps1 file and launch it via `cmd /c start`. This is
+  // THE fix for "restart did nothing": a plain detached + unref'd child is
+  // still torn down when the app exits ~10ms later (PowerShell never finishes
+  // starting), so the old helper never ran - the log only ever showed the
+  // Node-side lines and stopped. `start` creates a genuinely independent
+  // process that breaks away from the app's process tree and survives
+  // app.quit(). Launching a -File script (rather than a -Command string) keeps
+  // cmd's start parser away from the script's ; () {} characters.
+  const scriptPath = Path.join(tempDir, 'github-desktop-apply-update.ps1')
+  try {
+    fs.writeFileSync(scriptPath, psScript, 'utf8')
+  } catch (e) {
+    return fail('could not write the update helper script', e)
+  }
 
   try {
     const child = spawn(
-      powershell,
+      'cmd.exe',
       [
+        '/c',
+        'start',
+        '/min',
+        '""',
+        powershell,
+        '-ExecutionPolicy',
+        'Bypass',
         '-NoProfile',
         '-NonInteractive',
         '-WindowStyle',
         'Hidden',
-        '-Command',
-        psScript,
+        '-File',
+        scriptPath,
       ],
       {
         detached: true,
@@ -508,7 +530,7 @@ export function installPendingCustomUpdate(webContents?: WebContents): boolean {
     return fail('could not start the update helper', e)
   }
 
-  appendLog('update helper launched; quitting app')
+  appendLog(`update helper launched (${scriptPath}); quitting app`)
   app.quit()
   return true
 }
