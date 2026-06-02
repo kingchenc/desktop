@@ -127,21 +127,39 @@ class UpdateStore {
   }
 
   private onUpdateDownloaded = async () => {
-    this.newReleases = await generateReleaseSummary()
-    // We know it's an "immediate" auto-update from x64 to arm64 if the app is
-    // running on arm64 under x64 emulation and there is only one new release
-    // and it's the same version we have right now (which means we spoofed
-    // Central with an old version of the app).
-    this.isX64ToARM64ImmediateAutoUpdate =
-      this.supportsImmediateUpdateFromEmulatedX64ToARM64() &&
-      this.newReleases !== null &&
-      this.newReleases.length === 1 &&
-      this.newReleases[0].latestVersion === getVersion() &&
-      (await isRunningUnderARM64Translation())
+    // Surface the "ready - restart" state immediately. The release-notes fetch
+    // below reaches out to the changelog endpoint and can throw (network down,
+    // endpoint unreachable, non-JSON body); it must never gate the user's
+    // ability to restart into the freshly downloaded update. Setting the status
+    // first also guarantees the download-progress banner - which is dropped on
+    // custom-update-ready - is replaced by the restart banner instead of
+    // leaving the UI empty after "Downloading update... 100%".
+    this.isX64ToARM64ImmediateAutoUpdate = false
     this.status = UpdateStatus.UpdateReady
     this.emitDidChange()
-
     this.updatePriorityUpdateStatus()
+
+    // Best-effort enrichment: release notes power the banner's "what's new"
+    // link and the macOS x64->arm64 immediate-update detection. A failure here
+    // only costs the optional release-notes link, not the restart capability.
+    try {
+      this.newReleases = await generateReleaseSummary()
+
+      // We know it's an "immediate" auto-update from x64 to arm64 if the app is
+      // running on arm64 under x64 emulation and there is only one new release
+      // and it's the same version we have right now (which means we spoofed
+      // Central with an old version of the app).
+      this.isX64ToARM64ImmediateAutoUpdate =
+        this.supportsImmediateUpdateFromEmulatedX64ToARM64() &&
+        this.newReleases !== null &&
+        this.newReleases.length === 1 &&
+        this.newReleases[0].latestVersion === getVersion() &&
+        (await isRunningUnderARM64Translation())
+
+      this.emitDidChange()
+    } catch (e) {
+      log.warn(`Failed to fetch release summary after update download`, e)
+    }
   }
 
   /**
