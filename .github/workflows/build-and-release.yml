@@ -112,7 +112,7 @@ jobs:
           # instead of shipping unbranded.
           f=app/src/main-process/menu/build-default-menu.ts
           if ! grep -q 'Modified by KingchenC' "$f"; then
-            perl -0pi -e 's|(\n\s*ensureItemIds\(template\))|\n  template.push({ label: "Modified by KingchenC", submenu: [{ label: "Custom fork - github.com/kingchenc/desktop", click() { shell.openExternal("https://github.com/kingchenc/desktop").catch(err => log.error("Failed opening fork page", err)) } }] })$1|' "$f"
+            perl -0pi -e 's#(\n\s*ensureItemIds\(template\))#\n  template.push({ label: "Modified by KingchenC | v-" + (__CUSTOM_UPDATE_TAG__.split("-").pop() || "dev"), submenu: [{ label: "Custom fork - github.com/kingchenc/desktop", click() { shell.openExternal("https://github.com/kingchenc/desktop").catch(err => log.error("Failed opening fork page", err)) } }] })$1#' "$f"
           fi
           grep -q 'Modified by KingchenC' "$f"
           echo "Custom menu branding applied."
