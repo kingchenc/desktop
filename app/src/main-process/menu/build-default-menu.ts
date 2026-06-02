@@ -602,11 +602,19 @@ export function buildDefaultMenu({
     })
   }
 
-  // Custom fork branding: a disabled top-level label pinned to the menu bar so
-  // every build is identifiable as the modified fork at a glance.
+  // Custom fork branding: a top-level menu pinned to the menu bar so every
+  // build is identifiable as the modified fork. GitHub Desktop's custom Windows
+  // menu bar only renders top-level items that carry a submenu (app-menu-bar.tsx
+  // filters to type 'submenuItem'), so a bare label would never show - it must
+  // be a submenu.
   template.push({
     label: 'Modified by KingchenC',
-    enabled: false,
+    submenu: [
+      {
+        label: 'Custom fork - github.com/kingchenc/desktop',
+        enabled: false,
+      },
+    ],
   })
 
   ensureItemIds(template)
