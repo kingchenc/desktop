@@ -117,6 +117,21 @@ jobs:
           grep -q 'Modified by KingchenC' "$f"
           echo "Custom menu branding applied."
 
+      - name: Stamp a unique build version
+        shell: bash
+        run: |
+          # Every build otherwise keeps upstream's package.json version, so they
+          # all share one version (e.g. 3.5.12-beta2). Squirrel keys installs off
+          # that version and SKIPS applying a same-version Setup.exe, so in-app
+          # "restart to update" silently did nothing - the app just closed. Stamp
+          # a strictly-increasing version (patch = build number) so every release
+          # is a genuine upgrade Squirrel actually installs and relaunches. This
+          # is app/package.json - the one getVersion() and packaging read.
+          ver="3.5.${GITHUB_RUN_NUMBER}"
+          node -e "const fs=require('fs');const f='app/package.json';const p=JSON.parse(fs.readFileSync(f));p.version='${ver}';fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n')"
+          echo "app/package.json version set to ${ver}"
+          grep '"version"' app/package.json
+
       - name: Compute release tag
         shell: bash
         run: echo "TAG=custom-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
