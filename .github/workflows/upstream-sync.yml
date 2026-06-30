@@ -105,6 +105,7 @@ jobs:
 
       - name: Open issue on conflict
         if: steps.rebase.outputs.status == 'conflict'
+        continue-on-error: true   # disabled Issues (or API hiccup) must not be the failure mechanism
         uses: peter-evans/create-issue-from-file@v5
         with:
           title: '[URGENT] Merge-Konflikt bei GitHub Desktop Upstream-Sync'
@@ -138,3 +139,9 @@ jobs:
                   ;;
               esac
             done
+
+      - name: Fail the run on conflict
+        if: steps.rebase.outputs.status == 'conflict'
+        run: |
+          echo "::error::Upstream rebase hit a merge conflict. Resolve locally: git rebase upstream/$UPSTREAM_BRANCH, fix, git push --force-with-lease."
+          exit 1
