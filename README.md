@@ -1,3 +1,28 @@
+# 🔱 KingchenC Fork
+
+> A personalised fork of **[desktop/desktop](https://github.com/desktop/desktop)** (GitHub Desktop).
+> The original upstream README is preserved below — this top section documents **only** what this
+> fork's workflows and customizations add. The `custom` branch is rebased on upstream daily.
+
+### Automated CI — `.github/workflows/`
+- **Upstream Sync** (daily): rebases the `custom` branch onto `upstream/development`, strips and
+  disables inherited upstream automation, and on a merge conflict opens a notification issue
+  *without* breaking the run, then fails cleanly so a stale build is never shipped.
+- **Build and Release** (after each successful sync, or manual `workflow_dispatch`): builds the
+  Electron app and publishes a tagged GitHub Release on this fork.
+
+### Custom features
+- **Fork auto-updater** — checks *this fork's* releases, downloads with live progress (parallel
+  multi-range downloads to beat throttling), never silently auto-installs: shows a version-aware
+  **Restart** prompt, then installs and relaunches the app.
+- **Branding** — a "Modified by KingchenC" menu-bar entry (clickable) and the auto-incrementing
+  build version shown in the menu.
+- **Repository list** — pinned favorites, per-repo line counts, untracked-file counts, faster
+  status indicators, and a recent list capped at 10.
+- **Changes view** — per-file and total added/deleted line-count badges.
+
+---
+
 # [GitHub Desktop](https://desktop.github.com)
 
 [GitHub Desktop](https://desktop.github.com/) is an open-source [Electron](https://www.electronjs.org/)-based
