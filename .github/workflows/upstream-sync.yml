@@ -93,21 +93,21 @@ jobs:
         if: steps.rebase.outputs.status == 'conflict'
         run: |
           {
-            echo "Der automatische Upstream-Sync ist fehlgeschlagen: Beim Rebase von"
-            echo "\`$FEATURE_BRANCH\` auf \`upstream/$UPSTREAM_BRANCH\` ist ein **Merge-Konflikt** aufgetreten."
+            echo "The automatic upstream sync stopped: rebasing"
+            echo "\`$FEATURE_BRANCH\` onto \`upstream/$UPSTREAM_BRANCH\` hit a **merge conflict**."
             echo ""
-            echo "Upstream (desktop/desktop) hat Code geaendert, der mit den Custom-Patches kollidiert."
-            echo "Bitte lokal manuell aufloesen:"
+            echo "Upstream (desktop/desktop) changed code that clashes with the custom patches, so the fork was not advanced."
+            echo "Resolve it locally:"
             echo ""
             echo '```bash'
             echo "git fetch upstream"
             echo "git checkout $FEATURE_BRANCH"
             echo "git rebase upstream/$UPSTREAM_BRANCH"
-            echo "# Konflikte aufloesen, git add -A, git rebase --continue"
+            echo "# resolve the conflicts, then: git add -A, git rebase --continue"
             echo "git push origin $FEATURE_BRANCH --force-with-lease"
             echo '```'
             echo ""
-            echo "Workflow-Lauf: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > conflict-report.md
 
       - name: Open issue on conflict
@@ -115,7 +115,7 @@ jobs:
         continue-on-error: true   # disabled Issues (or API hiccup) must not be the failure mechanism
         uses: peter-evans/create-issue-from-file@v5
         with:
-          title: '[URGENT] Merge-Konflikt bei GitHub Desktop Upstream-Sync'
+          title: '[URGENT] Merge conflict during GitHub Desktop upstream sync'
           content-filepath: conflict-report.md
           labels: |
             upstream-sync
