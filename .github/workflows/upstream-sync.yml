@@ -71,6 +71,13 @@ jobs:
           # including any newly introduced by upstream.
           find .github -type f ! -path '.github/workflows/*' -delete
           find .github -mindepth 1 -type d -empty -delete
+          # Keep only the fork's own workflow files. Upstream changes to
+          # .github/workflows/ (e.g. ci.yml) can't be pushed with the default
+          # GITHUB_TOKEN, which is exactly what breaks this sync whenever upstream
+          # touches a workflow. Reset the workflows dir to the fork's pre-rebase
+          # state (ORIG_HEAD) so the push carries no workflow-file change at all.
+          rm -rf .github/workflows
+          git checkout ORIG_HEAD -- .github/workflows
           if [ -n "$(git status --porcelain)" ]; then
             git add -A
             git commit -m "chore: strip upstream non-workflow automation after sync"
