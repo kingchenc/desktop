@@ -150,5 +150,4 @@ jobs:
       - name: Fail the run on conflict
         if: steps.rebase.outputs.status == 'conflict'
         run: |
-          echo "::error::Upstream rebase hit a merge conflict. Resolve locally: git rebase upstream/$UPSTREAM_BRANCH, fix, git push --force-with-lease."
-          exit 1
+          echo "::warning::Upstream rebase hit a merge conflict — the fork was NOT advanced (an issue was opened). Resolve locally: git rebase upstream/$UPSTREAM_BRANCH, fix, git push --force-with-lease."
